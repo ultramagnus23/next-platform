@@ -11,6 +11,11 @@ const ROUTE_ACCESS = {
   '/platform/rep-dashboard': ['rep_dashboard'],
   '/sg-compose': ['platform'],
   '/organisations': ['organization'],
+  // The admin layout also admits booking_admin, so the older admin pages are
+  // pinned to ashoka_admin here.
+  '/admin/bookings': ['booking_admin'],
+  '/admin/organisations': ['ashoka_admin'],
+  '/admin/organizations': ['ashoka_admin'],
 }
 
 // Induction surfaces an organisation can share with individuals who are not
@@ -79,6 +84,17 @@ export default auth(async function middleware(req) {
   if (pathname.startsWith('/_next/') ||
     pathname.startsWith('/favicon.ico') ||
     pathname.startsWith('/public/')) {
+    return NextResponse.next()
+  }
+
+  // Local demo only: with both flags set, the booking portal skips sign-in.
+  // Never active in production builds.
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    process.env.BOOKING_DEMO_MODE === 'true' &&
+    process.env.BYPASS_AUTH === 'true' &&
+    (pathname.startsWith('/admin/bookings') || pathname.startsWith('/api/admin/bookings'))
+  ) {
     return NextResponse.next()
   }
 

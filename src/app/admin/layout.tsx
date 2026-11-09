@@ -38,7 +38,8 @@ export default async function AdminLayout({
   const isAuthorized =
     (session?.user?.email && adminEmails.includes(session.user.email)) ||
     session?.user?.role === 'ashoka_admin' ||
-    session?.user?.access?.includes('ashoka_admin');
+    session?.user?.access?.includes('ashoka_admin') ||
+    session?.user?.access?.includes('booking_admin');
   const bypassAuth = process.env.BYPASS_AUTH === 'true';
 
   if (!isAuthorized && !bypassAuth) {

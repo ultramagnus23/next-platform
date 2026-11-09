@@ -50,3 +50,5 @@ ds-bundle/
 .design-sync/learnings/
 .design-sync/node_modules
 .env
+# Key names for contributors; never put values here
+!.env.example

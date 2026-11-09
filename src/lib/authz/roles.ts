@@ -26,6 +26,7 @@ import {
   byStrapiCollection,
 } from './assigners'
 import type { AssignContext, RoleDefinition, Sport, SportDefinition } from './types'
+import { isBookingAuthorityMember } from '@/app/admin/bookings/_server/authorities'
 
 function defineRole<const Id extends string>(role: RoleDefinition<Id>): RoleDefinition<Id> {
   return role
@@ -54,7 +55,7 @@ export const ROLES = [
     id: 'superadmin',
     label: 'Super Admin',
     description: 'Listed in SUPERADMIN_EMAILS. Carries every access grant.',
-    access: ['platform', 'ashoka_admin', 'organization', 'rep_dashboard', 'beta_features', 'apl_admin'],
+    access: ['platform', 'ashoka_admin', 'booking_admin', 'organization', 'rep_dashboard', 'beta_features', 'apl_admin'],
     assign: byEnvList('SUPERADMIN_EMAILS'),
   }),
   defineRole({
@@ -63,6 +64,13 @@ export const ROLES = [
     description: 'University staff. Listed in ADMIN_EMAILS.',
     access: ['platform', 'ashoka_admin', 'organization'],
     assign: byEnvList('ADMIN_EMAILS'),
+  }),
+  defineRole({
+    id: 'booking_authority',
+    label: 'Booking Authority',
+    description: 'Listed under an authority in BOOKING_AUTHORITIES. Reviews room booking requests.',
+    access: ['platform', 'booking_admin'],
+    assign: (ctx) => isBookingAuthorityMember(ctx.email),
   }),
   defineRole({
     id: 'organization',
