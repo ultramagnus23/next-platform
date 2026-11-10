@@ -90,6 +90,7 @@ export function InboxView({ data, detail, selectedId, lane, q, demo, officeName,
   const [snoozed, setSnoozed] = useState<Record<string, number>>({})
   const [showSnoozed, setShowSnoozed] = useState(false)
   const [groupBy, setGroupBy] = useState<'lane' | 'club' | 'room'>('lane')
+  const [picked, setPicked] = useState<Set<string>>(new Set())
   const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -211,6 +212,10 @@ export function InboxView({ data, detail, selectedId, lane, q, demo, officeName,
   }
 
   const approveAllClear = () => approveRows(grouped.clear)
+  const approvePicked = async () => {
+    await approveRows(rows.filter((r) => picked.has(r.request.id)))
+    setPicked(new Set())
+  }
 
   // Grouping by club or by room and date, so a recurring series can be approved together.
   const customGroups = useMemo(() => {
@@ -237,7 +242,23 @@ export function InboxView({ data, detail, selectedId, lane, q, demo, officeName,
   const rowButton = (row: InboxRow) => {
     const selected = row.request.id === selectedId
     return (
-      <li key={row.request.id}>
+      <li key={row.request.id} className="flex items-center">
+        {data.tab === 'review' && row.lane === 'clear' && (
+          <input
+            type="checkbox"
+            aria-label={`Select ${row.request.eventName}`}
+            className="ml-3 h-4 w-4 shrink-0 accent-[#87281b]"
+            checked={picked.has(row.request.id)}
+            onChange={(e) =>
+              setPicked((prev) => {
+                const next = new Set(prev)
+                if (e.target.checked) next.add(row.request.id)
+                else next.delete(row.request.id)
+                return next
+              })
+            }
+          />
+        )}
         <button
           type="button"
           aria-current={selected}
@@ -245,7 +266,7 @@ export function InboxView({ data, detail, selectedId, lane, q, demo, officeName,
             go({ r: row.request.id })
             setSheetOpen(true)
           }}
-          className={cn('grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 text-left', selected ? 'bg-primary/10' : 'hover:bg-accent/50', isSnoozed(row.request.id) && 'opacity-50')}
+          className={cn('grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 text-left', selected ? 'bg-primary/10' : 'hover:bg-accent/50', isSnoozed(row.request.id) && 'opacity-50')}
         >
           <span className="min-w-0">
             <span className={cn('block truncate text-sm', selected ? 'font-semibold' : 'font-medium')}>{row.request.eventName}</span>
@@ -270,6 +291,7 @@ export function InboxView({ data, detail, selectedId, lane, q, demo, officeName,
     <div className="grid min-w-0 content-start gap-5">
       {data.tab === 'review' && data.rows.length > 0 && (
         <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Show only">
+          <span className="text-sm text-muted-foreground">Show</span>
           {[
             { id: null, label: 'All', count: data.counts.clash + data.counts.look + data.counts.clear },
             { id: 'clash' as Lane, label: 'Clashes', count: data.counts.clash },
@@ -290,7 +312,7 @@ export function InboxView({ data, detail, selectedId, lane, q, demo, officeName,
       )}
 
       {data.tab === 'review' && data.rows.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 text-sm" role="group" aria-label="Group by">
+        <div className="-mt-2 flex flex-wrap items-center gap-2 text-sm" role="group" aria-label="Group by">
           <span className="text-muted-foreground">Group by</span>
           {([['lane', 'Type'], ['club', 'Club'], ['room', 'Room and date']] as const).map(([id, label]) => (
             <button
@@ -368,6 +390,22 @@ export function InboxView({ data, detail, selectedId, lane, q, demo, officeName,
             )
           })
         : rows.length > 0 && <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">{rows.map(rowButton)}</ul>}
+
+      {picked.size > 0 && (
+        <div className="sticky bottom-3 z-20 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-border bg-card p-3 shadow-lg" role="region" aria-label="Selected requests">
+          <p className="text-sm">
+            <strong>{picked.size}</strong> selected. They will be approved and sent to {nextOffice}, and the clubs emailed.
+          </p>
+          <div className="flex gap-2">
+            <Button size="sm" variant="outline" onClick={() => setPicked(new Set())}>
+              Clear selection
+            </Button>
+            <Button size="sm" className="bg-[#1d6b3f] text-white hover:bg-[#175a34]" disabled={bulkBusy} onClick={approvePicked}>
+              {bulkBusy ? 'Approving…' : `Approve ${picked.size}`}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {snoozedCount > 0 && (
         <button type="button" className="justify-self-start text-sm underline" onClick={() => setShowSnoozed((v) => !v)}>

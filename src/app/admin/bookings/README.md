@@ -85,3 +85,15 @@ To do that last step yourself: set `AUTH_CLIENT_ID`, `AUTH_CLIENT_SECRET`, `NEXT
 `SUPERADMIN_EMAILS` and `BOOKING_OFFICES` in `.env`, leave `BOOKING_DEMO_MODE` and `BYPASS_AUTH` unset, run `npm run dev`, and sign in
 with an account listed in `BOOKING_OFFICES`. A role change reaches a signed-in person within 10 minutes, or immediately on a new sign-in.
 If Strapi is down, an existing session keeps its old role and retries after a minute.
+
+## Speed
+
+The service work takes 3 to 25 ms per page. What you feel in `npm run dev` is Next compiling each route the first time (about 15
+seconds for the first page) and about 0.5 s of dev overhead per request. A production build answers pages in 80 to 200 ms. Note that
+the local sign-in bypass is switched off in production builds on purpose, so a production run needs a real sign-in.
+Reads share one loaded copy of the data for two seconds, and any write drops it. Demo data is built when the server starts.
+
+## Who can see what
+
+Every approver can read every request, room and clash, so they can see what else is booked and what other clubs are asking for.
+Only the offices in a request's chain can act on it, and only Academic Booking and super admins can resolve a clash.

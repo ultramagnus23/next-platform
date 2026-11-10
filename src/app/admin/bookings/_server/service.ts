@@ -103,6 +103,8 @@ function nextRequestId(requests: BookingRequest[]): string {
 export class BookingService {
   private readonly mutex = new KeyedMutex()
   private offsetMs = 0
+  private mutation = 0
+  private ctxCache: { at: number; mutation: number; ctx: EngineContext } | null = null
   private digestWeek = new Map<string, string>()
 
   constructor(
@@ -122,6 +124,9 @@ export class BookingService {
   /* ---------------- Context ---------------- */
 
   private async loadContext(): Promise<EngineContext> {
+    const hit = this.ctxCache
+    if (hit && hit.mutation === this.mutation && Date.now() - hit.at < 2000) return hit.ctx
+    const mutation = this.mutation
     const [settings, rooms, organisations, requests, timetable] = await Promise.all([
       this.repo.getSettings(),
       this.repo.listRooms(),
@@ -129,7 +134,7 @@ export class BookingService {
       this.repo.listRequests(),
       this.repo.listTimetable(),
     ])
-    return {
+    const ctx: EngineContext = {
       settings,
       rooms,
       organisations,
@@ -137,6 +142,14 @@ export class BookingService {
       requests,
       newId: (kind) => (kind === 'request' ? nextRequestId(requests) : runtimeId(kind === 'log' ? 'LOG' : 'EM')),
     }
+    this.ctxCache = { at: Date.now(), mutation, ctx }
+    return ctx
+  }
+
+  /** Reads share one loaded copy for two seconds. Anything that writes drops it. */
+  private async read(): Promise<EngineContext> {
+    await this.sweepNow()
+    return this.loadContext()
   }
 
   /** Lapses offers, expires started events and sends overdue notices. Cheap when nothing is due. */
@@ -147,6 +160,7 @@ export class BookingService {
     const digests = this.weeklyDigests(ctx, now)
     const emails = [...result.emails, ...digests]
     if (result.requests.length === 0 && result.logs.length === 0 && emails.length === 0) return
+    this.mutation += 1
     if (result.requests.length > 0) await this.repo.saveRequests(result.requests)
     if (result.logs.length > 0) await this.repo.appendLogs(result.logs)
     if (emails.length > 0) await this.repo.appendOutbox(emails)
@@ -193,6 +207,7 @@ export class BookingService {
     const before = changed.map((c) => ctx.requests.find((r) => r.id === c.id)).filter((r): r is BookingRequest => r !== undefined)
     const afterVersions: Record<string, number> = {}
     for (const c of changed) afterVersions[c.id] = c.version
+    this.mutation += 1
     await this.repo.saveRequests(changed)
     await this.repo.appendLogs(tagLogs)
     await this.repo.appendOutbox(tagEmails)
@@ -332,6 +347,7 @@ export class BookingService {
       const ctx = await this.loadContext()
       const result = undoBatch(batch, actor, ctx, this.now())
       if ('error' in result) return fromEngineError(result)
+      this.mutation += 1
       await this.repo.saveRequests(result.requests)
       await this.repo.appendLogs(result.logs)
       await this.repo.voidOutboxByBatch(batchId, 'Undone')
@@ -409,6 +425,7 @@ export class BookingService {
 
   async saveSettings(actor: Actor, settings: BookingSettings): Promise<ServiceResult<BookingSettings>> {
     if (!actor.canEditRules) return failure(403, 'Only a super admin can change rules.')
+    this.mutation += 1
     await this.repo.saveSettings(settings)
     return { ok: true, data: settings }
   }
@@ -429,11 +446,13 @@ export class BookingService {
 
   async reset(): Promise<void> {
     this.offsetMs = 0
+    this.mutation += 1
     await this.repo.reset()
   }
 
   async advanceDays(days: number): Promise<ClockState> {
     this.offsetMs += days * 86_400_000
+    this.mutation += 1
     await this.sweepNow()
     return this.clockState()
   }
@@ -453,7 +472,7 @@ export class BookingService {
   }
 
   async getOutbox(actor: Actor, filter: { trigger?: string; requestId?: string } = {}): Promise<OutboxEmail[]> {
-    const ctx = await this.fresh()
+    const ctx = await this.read()
     const emails = await this.repo.listOutbox()
     const visible = new Set(ctx.requests.filter((r) => visibilityOf(actor, r, ctx) === 'full').map((r) => r.id))
     const myInboxes = new Set(ctx.settings.offices.filter((o) => actor.isSuperAdmin || o.id === actor.actingFor).flatMap((o) => o.inboxEmails))
@@ -463,18 +482,18 @@ export class BookingService {
   }
 
   async getRoomsDay(query: RoomsDayQuery): Promise<RoomsDayData> {
-    const ctx = await this.fresh()
+    const ctx = await this.read()
     return roomsDay(ctx, query)
   }
 
   async findFree(query: FreeRoomQuery): Promise<FreeRoom[]> {
-    const ctx = await this.fresh()
+    const ctx = await this.read()
     const anchor = query.excludeRoomId ? ctx.rooms.find((r) => r.id === query.excludeRoomId) : undefined
     return freeRooms(ctx, query, anchor).slice(0, 12)
   }
 
   async getInbox(actor: Actor, f: InboxFilters): Promise<InboxData> {
-    const ctx = await this.fresh()
+    const ctx = await this.read()
     const now = this.now()
     const { settings, rooms, organisations, requests } = ctx
     const officeName = settings.offices.find((o) => o.id === actor.actingFor)?.label ?? 'you'
@@ -574,7 +593,7 @@ export class BookingService {
   }
 
   async getRequestDetail(actor: Actor, id: string): Promise<ServiceResult<RequestDetail>> {
-    const ctx = await this.fresh()
+    const ctx = await this.read()
     const now = this.now()
     const request = ctx.requests.find((r) => r.id === id)
     if (!request) return failure(404, 'Request not found.')
@@ -633,7 +652,7 @@ export class BookingService {
   }
 
   async listClashes(actor: Actor): Promise<ClashGroupView[]> {
-    const ctx = await this.fresh()
+    const ctx = await this.read()
     const views: ClashGroupView[] = []
     for (const group of allClashGroups(ctx)) {
       if (!group.members.some((m) => m.status === 'pending')) continue
@@ -644,7 +663,7 @@ export class BookingService {
   }
 
   async getClash(actor: Actor, groupId: string): Promise<ServiceResult<ClashGroupView>> {
-    const ctx = await this.fresh()
+    const ctx = await this.read()
     const view = this.buildClashView(actor, groupId, ctx)
     return view ? { ok: true, data: view } : failure(404, 'This clash no longer exists.')
   }
@@ -711,7 +730,7 @@ export class BookingService {
   }
 
   async getOrganisations(actor: Actor): Promise<OrgRow[]> {
-    const ctx = await this.fresh()
+    const ctx = await this.read()
     const now = this.now()
     void actor
     return ctx.organisations.map((organisation) => {
@@ -724,7 +743,7 @@ export class BookingService {
   /** Plain numbers for planning: how full rooms are, how long approval takes, who is busiest. */
   async getInsights(actor: Actor): Promise<InsightsData> {
     void actor
-    const ctx = await this.fresh()
+    const ctx = await this.read()
     const now = this.now()
     const today = todayIST(now)
     const to = addDays(today, 6)
@@ -808,7 +827,7 @@ export class BookingService {
 
   /** Seven days of one room, Monday first. */
   async getRoomWeek(roomId: string, anchorDate: string): Promise<Array<{ date: string; blocks: TimelineBlock[] }>> {
-    const ctx = await this.fresh()
+    const ctx = await this.read()
     const monday = startOfWeek(anchorDate)
     return Array.from({ length: 7 }, (_, i) => {
       const date = addDays(monday, i)
@@ -818,7 +837,7 @@ export class BookingService {
 
   /** Counts per day for a month grid. */
   async getMonth(anchorDate: string, building?: string): Promise<MonthDay[]> {
-    const ctx = await this.fresh()
+    const ctx = await this.read()
     const from = startOfMonth(anchorDate)
     const to = endOfMonth(anchorDate)
     const inBuilding = (roomId: string) => !building || ctx.rooms.find((r) => r.id === roomId)?.building === building
@@ -839,7 +858,7 @@ export class BookingService {
 
   /** A day-by-day list of events in the next couple of weeks. */
   async getAgenda(actor: Actor, f: AgendaFilters): Promise<AgendaRow[]> {
-    const ctx = await this.fresh()
+    const ctx = await this.read()
     const from = todayIST(this.now())
     const to = addDays(from, f.days ?? 14)
     const q = f.q?.trim().toLowerCase() ?? ''

@@ -17,7 +17,7 @@ import {
   type MailContext,
 } from '../_server/engine/notifications'
 import type { ActionAvailability, ActionId, EmailDraft, FreeRoom, MutationOutcome, RequestDetail } from '../types'
-import { formatCompactDateTime, formatDate, formatTimestamp, formatVenue, relativeTime } from '../utils'
+import { formatCompactDateTime, formatCompactRange, formatDate, formatTimestamp, formatVenue, relativeTime } from '../utils'
 import { RoomTimeline } from './room-timeline'
 import { postJson, STALE_MESSAGE, useUndoToast, type ApiResult } from './use-booking-action'
 
@@ -78,7 +78,7 @@ export function RequestPane({ detail, demo, onDone }: RequestPaneProps) {
   const [note, setNote] = useState('')
   const [offerRoom, setOfferRoom] = useState<string | null>(null)
   const [options, setOptions] = useState<FreeRoom[]>(detail.alternatives)
-  const [showHistory, setShowHistory] = useState(false)
+  const [paneTab, setPaneTab] = useState<'request' | 'room' | 'rooms' | 'history'>('request')
   const [nowMs, setNowMs] = useState<number | null>(null)
   useEffect(() => setNowMs(Date.now()), [detail.request.id])
 
@@ -88,7 +88,7 @@ export function RequestPane({ detail, demo, onDone }: RequestPaneProps) {
     setNote('')
     setOfferRoom(detail.alternatives[0]?.room.id ?? null)
     setOptions(detail.alternatives)
-    setShowHistory(false)
+    setPaneTab('request')
   }, [detail.request.id, detail.request.version, detail.alternatives])
 
   const act = (id: ActionId): ActionAvailability | undefined => detail.actions.find((a) => a.action === id)
@@ -139,8 +139,7 @@ export function RequestPane({ detail, demo, onDone }: RequestPaneProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doApprove, detail.actions])
 
-  async function openOffer() {
-    setMode('offer')
+  async function loadFree() {
     try {
       const q = new URLSearchParams({
         date: request.date,
@@ -156,9 +155,19 @@ export function RequestPane({ detail, demo, onDone }: RequestPaneProps) {
         setOfferRoom((cur) => cur ?? json.data?.[0]?.room.id ?? null)
       }
     } catch {
-      /* the three suggested rooms stay */
+      /* the suggested rooms stay */
     }
   }
+
+  async function openOffer() {
+    setMode('offer')
+    await loadFree()
+  }
+
+  useEffect(() => {
+    if (paneTab === 'rooms') void loadFree()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paneTab, detail.request.id])
 
   const chosen = options.find((o) => o.room.id === offerRoom)?.room ?? null
   const text = reason.trim() || '(your reason)'
@@ -244,6 +253,22 @@ export function RequestPane({ detail, demo, onDone }: RequestPaneProps) {
       </dl>
       {request.description && <p className="max-w-[62ch] text-sm">{request.description}</p>}
 
+      <div role="tablist" aria-label="Request views" className="flex flex-wrap gap-1 border-b border-border">
+        {([['request', 'Request'], ['room', 'Room today'], ['rooms', 'Other rooms'], ['history', 'History']] as const).map(([id, name]) => (
+          <button
+            key={id}
+            type="button"
+            role="tab"
+            aria-selected={paneTab === id}
+            onClick={() => setPaneTab(id)}
+            className={cn('-mb-px border-b-2 px-3 py-1.5 text-sm', paneTab === id ? 'border-primary font-semibold' : 'border-transparent text-muted-foreground hover:text-foreground')}
+          >
+            {name}
+          </button>
+        ))}
+      </div>
+
+      {paneTab === 'request' && (
       <section aria-label="Checks" className="grid gap-2">
         {clashCallout.length > 0 && (
           <Callout tone="red" title={`Clash with ${clashCallout.length === 1 ? 'one other request' : `${clashCallout.length} other requests`}`}>
@@ -292,10 +317,95 @@ export function RequestPane({ detail, demo, onDone }: RequestPaneProps) {
           {detail.standing.semester.used} used, {detail.standing.semester.noShows} {detail.standing.semester.noShows === 1 ? 'no-show' : 'no-shows'}, {detail.standing.semester.lateCancels} late cancellations.
         </p>
       </section>
+      )}
+
+      {paneTab === 'room' && (
+        <section aria-label="Room on this day" className="grid gap-3">
+          <h3 className="text-sm font-semibold">
+            {formatVenue(room)} on {formatDate(request.date)}
+          </h3>
+          <RoomTimeline blocks={detail.roomDay} highlightId={request.id} />
+          <div>
+            <h3 className="text-sm font-semibold">Everything in this room that day</h3>
+            <ul className="mt-1 grid gap-1 text-sm">
+              {detail.roomDay.length === 0 && <li className="text-muted-foreground">Nothing else is booked.</li>}
+              {detail.roomDay.map((b) => (
+                <li key={b.id} className="flex items-start justify-between gap-2">
+                  <span className={cn(b.requestId === request.id && 'font-semibold')}>
+                    {formatCompactRange(b.startMin, b.endMin)} · {b.requestId === request.id ? 'This request' : b.label}
+                  </span>
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {b.kind === 'class' ? 'Class' : b.kind === 'booked' ? 'Confirmed' : b.kind === 'held' ? 'Offered, held' : 'Waiting for approval'}
+                    {b.inClash ? ', clash' : ''}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <Link className="text-sm underline" href={`/admin/bookings/rooms?date=${request.date}&from=${request.startMin}&to=${request.endMin}&minSeats=${request.expectedAttendance}`}>
+            See every room at this time
+          </Link>
+        </section>
+      )}
+
+      {paneTab === 'rooms' && (
+        <section aria-label="Other rooms" className="grid gap-2">
+          <h3 className="text-sm font-semibold">
+            Free at the same time for {request.expectedAttendance} people
+          </h3>
+          {options.length === 0 && <p className="text-sm text-muted-foreground">No other room is free at this time with enough seats.</p>}
+          <ul className="grid gap-1.5">
+            {options.map((a) => (
+              <li key={a.room.id} className="flex items-center justify-between gap-2 rounded-md border border-border p-2 text-sm">
+                <span>
+                  <span className="font-medium">{formatVenue(a.room)}</span>
+                  <span className="block text-xs text-muted-foreground">
+                    {a.room.capacity} seats{a.room.features.length ? ` · ${a.room.features.join(', ')}` : ''}
+                    {a.competing > 0 ? ` · ${a.competing} other request waiting` : ''}
+                  </span>
+                </span>
+                {act('offer_room')?.enabled && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setOfferRoom(a.room.id)
+                      void openOffer()
+                    }}
+                  >
+                    Suggest
+                  </Button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {paneTab === 'history' && (
+        <section aria-label="History">
+          {detail.logs.length === 0 && <p className="text-sm text-muted-foreground">Nothing has happened yet.</p>}
+          <ol className="grid gap-2">
+            {detail.logs.map((log) => (
+              <li key={log.id} className={cn('border-l-2 pl-3 text-sm', log.internal ? 'border-amber-400' : 'border-border')}>
+                <p>
+                  <span className="font-medium">{log.actorRole === 'system' ? 'System' : log.actorRole === 'organisation' ? organisation.name : log.actorRole === 'superadmin' ? 'Super admin' : label(log.actorRole)}</span>{' '}
+                  {log.action.replace(/_/g, ' ')}
+                  {log.internal ? ' (internal)' : ''}
+                </p>
+                {log.reason && <p className="text-muted-foreground">{log.reason}</p>}
+                <p className="text-xs text-muted-foreground">
+                  {log.actorEmail} · {formatTimestamp(log.at)}
+                </p>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
 
       {detail.visibility === 'summary' ? (
         <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
-          This request clashes with one of yours. You can read it. Academic Booking decides between requests from different offices.
+          You can read this request but not decide it. It is with {label(request.stages[request.stageIndex] ?? 'acad')} now. Academic Booking decides clashes between offices.
         </p>
       ) : (
         <section aria-label="Actions" className="grid gap-2">
@@ -487,72 +597,6 @@ export function RequestPane({ detail, demo, onDone }: RequestPaneProps) {
         </section>
       )}
 
-      <details className="rounded-lg border border-border px-3 py-2">
-        <summary className="cursor-pointer text-sm font-semibold">More details: room timeline, free rooms and the club record</summary>
-        <div className="mt-3 grid gap-4">
-      <section aria-label="Room on this day" className="grid gap-1.5">
-            <h3 className="text-sm font-semibold">
-              {formatVenue(room)} on {formatDate(request.date)}
-            </h3>
-            <RoomTimeline blocks={detail.roomDay} highlightId={request.id} />
-          </section>
-
-          {detail.alternatives.length > 0 && mode === null && request.status !== 'confirmed' && (
-            <section aria-label="Free at the same time" className="grid gap-1.5">
-              <h3 className="text-sm font-semibold">Free at the same time</h3>
-              <ul className="grid gap-1.5">
-                {detail.alternatives.map((a) => (
-                  <li key={a.room.id} className="flex items-center justify-between gap-2 rounded-md border border-border p-2 text-sm">
-                    <span>
-                      <span className="font-medium">{formatVenue(a.room)}</span>
-                      <span className="text-muted-foreground">
-                        {' '}
-                        · {a.room.capacity} seats{a.competing > 0 ? ` · ${a.competing} other request waiting` : ''}
-                      </span>
-                    </span>
-                    {act('offer_room')?.enabled && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setOfferRoom(a.room.id)
-                          void openOffer()
-                        }}
-                      >
-                        Offer
-                      </Button>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-        </div>
-      </details>
-
-      <section aria-label="History">
-        <button type="button" className="text-sm font-semibold underline" aria-expanded={showHistory} onClick={() => setShowHistory((v) => !v)}>
-          History ({detail.logs.length})
-        </button>
-        {showHistory && (
-          <ol className="mt-2 grid gap-2">
-            {detail.logs.map((log) => (
-              <li key={log.id} className={cn('border-l-2 pl-3 text-sm', log.internal ? 'border-amber-400' : 'border-border')}>
-                <p>
-                  <span className="font-medium">{log.actorRole === 'system' ? 'System' : log.actorRole === 'organisation' ? organisation.name : log.actorRole === 'superadmin' ? 'Super admin' : label(log.actorRole)}</span>{' '}
-                  {log.action.replace(/_/g, ' ')}
-                  {log.internal ? ' (internal)' : ''}
-                </p>
-                {log.reason && <p className="text-muted-foreground">{log.reason}</p>}
-                <p className="text-xs text-muted-foreground">
-                  {log.actorEmail} · {formatTimestamp(log.at)}
-                </p>
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
     </article>
   )
 }

@@ -1,5 +1,4 @@
 import type { Actor, BookingRequest, EngineContext } from '../types'
-import { clashesFor } from './engine/occupancy'
 
 /**
  * Who can see and do what. The client never sends offices or ids that decide
@@ -17,12 +16,12 @@ export function isFinalOffice(actor: Actor, ctx: Pick<EngineContext, 'settings'>
  * so I may read it but not act on it. none: not mine.
  */
 export function visibilityOf(actor: Actor, request: BookingRequest, ctx: EngineContext): 'full' | 'summary' | 'none' {
+  void ctx
   if (isFinalOffice(actor, ctx)) return 'full'
   if (request.stages.some((s) => actor.offices.includes(s))) return 'full'
-  const involvesMe = clashesFor(ctx, request.id).some(
-    (c) => c.item.request?.stages.some((s) => actor.offices.includes(s)) ?? false,
-  )
-  return involvesMe ? 'summary' : 'none'
+  // Every approver can read every request, so they can see what else is booked and what clashes.
+  // Only the offices in a request's chain can act on it.
+  return 'summary'
 }
 
 export function canResolveClashes(actor: Actor, ctx: Pick<EngineContext, 'settings'>): boolean {
