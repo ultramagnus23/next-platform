@@ -63,6 +63,8 @@ export function buildSettings(): BookingSettings {
     offerHoldHours: 24,
     undoSeconds: 10,
     defaultWeeklyCap: 6,
+    maxDurationMin: 240,
+    bookingWindowDays: 60,
   }
 }
 

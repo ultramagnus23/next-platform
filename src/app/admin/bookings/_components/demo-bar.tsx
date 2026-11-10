@@ -67,7 +67,7 @@ export function BookingBar({ demo, persona, actingFor, offices, options, clockLa
   if (!demo) return actingSelect || null
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 sm:flex-row sm:items-center sm:justify-between dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+    <div className="flex flex-col gap-1.5 rounded-md border border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
       <p>
         {DEMO_BANNER}
         {clockLabel && <span className="ml-2 font-medium">{clockLabel}</span>}

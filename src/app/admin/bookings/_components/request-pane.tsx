@@ -79,6 +79,8 @@ export function RequestPane({ detail, demo, onDone }: RequestPaneProps) {
   const [offerRoom, setOfferRoom] = useState<string | null>(null)
   const [options, setOptions] = useState<FreeRoom[]>(detail.alternatives)
   const [showHistory, setShowHistory] = useState(false)
+  const [nowMs, setNowMs] = useState<number | null>(null)
+  useEffect(() => setNowMs(Date.now()), [detail.request.id])
 
   useEffect(() => {
     setMode(null)
@@ -127,7 +129,7 @@ export function RequestPane({ detail, demo, onDone }: RequestPaneProps) {
       const k = e.key.toLowerCase()
       if (k === 'a') doApprove()
       else if (k === 'o' && act('offer_room')?.enabled) openOffer()
-      else if (k === 'c' && act('request_changes')?.enabled) setMode('changes')
+      else if (k === 'r' && act('request_changes')?.enabled) setMode('changes')
       else if (k === 'd' && act('reject')?.enabled) setMode('decline')
       else return
       e.preventDefault()
@@ -201,23 +203,30 @@ export function RequestPane({ detail, demo, onDone }: RequestPaneProps) {
         </p>
       </header>
 
-      <ol className="flex flex-wrap items-center gap-1.5 text-xs" aria-label="Approval steps">
-        <li className="rounded-full border border-border bg-muted px-2.5 py-1">Submitted</li>
-        {stageLabels.map((s, i) => {
+      <ol className="grid gap-1.5 text-sm" aria-label="Approval steps">
+        {stageLabels.map((name, i) => {
           const past = done || i < request.stageIndex
           const current = !past && i === request.stageIndex && request.status === 'pending'
+          const office = offices.find((o) => o.id === request.stages[i])
+          const slaDays = Math.max(1, Math.round((office?.responseTargetHours ?? 48) / 24))
+          const waited = nowMs ? Math.floor((nowMs - Date.parse(request.stageEnteredAt)) / 86_400_000) + 1 : 1
           return (
-            <li
-              key={`${s}-${i}`}
-              className={cn(
-                'rounded-full border px-2.5 py-1',
-                past && 'border-border bg-muted',
-                current && 'border-primary bg-primary font-semibold text-white',
-                !past && !current && 'border-border text-muted-foreground',
-              )}
-            >
-              {s}
-              {current ? ': you' : ''}
+            <li key={`${name}-${i}`} className="flex items-center gap-2">
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px]',
+                  past && 'border-emerald-600 bg-emerald-600 text-white',
+                  current && 'border-primary bg-primary text-white',
+                  !past && !current && 'border-border text-muted-foreground',
+                )}
+              >
+                {past ? '✓' : i + 1}
+              </span>
+              <span className={cn(current && 'font-semibold', !past && !current && 'text-muted-foreground')}>
+                {name}
+                {past ? ' approved' : current ? `: you are up. Waiting, day ${waited} of ${slaDays}` : ''}
+              </span>
             </li>
           )
         })}
@@ -284,44 +293,6 @@ export function RequestPane({ detail, demo, onDone }: RequestPaneProps) {
         </p>
       </section>
 
-      <section aria-label="Room on this day" className="grid gap-1.5">
-        <h3 className="text-sm font-semibold">
-          {formatVenue(room)} on {formatDate(request.date)}
-        </h3>
-        <RoomTimeline blocks={detail.roomDay} highlightId={request.id} />
-      </section>
-
-      {detail.alternatives.length > 0 && mode === null && request.status !== 'confirmed' && (
-        <section aria-label="Free at the same time" className="grid gap-1.5">
-          <h3 className="text-sm font-semibold">Free at the same time</h3>
-          <ul className="grid gap-1.5">
-            {detail.alternatives.map((a) => (
-              <li key={a.room.id} className="flex items-center justify-between gap-2 rounded-md border border-border p-2 text-sm">
-                <span>
-                  <span className="font-medium">{formatVenue(a.room)}</span>
-                  <span className="text-muted-foreground">
-                    {' '}
-                    · {a.room.capacity} seats{a.competing > 0 ? ` · ${a.competing} other request waiting` : ''}
-                  </span>
-                </span>
-                {act('offer_room')?.enabled && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      setOfferRoom(a.room.id)
-                      void openOffer()
-                    }}
-                  >
-                    Offer
-                  </Button>
-                )}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-
       {detail.visibility === 'summary' ? (
         <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
           This request clashes with one of yours. You can read it. Academic Booking decides between requests from different offices.
@@ -359,7 +330,7 @@ export function RequestPane({ detail, demo, onDone }: RequestPaneProps) {
               )}
               <div className="grid grid-cols-3 gap-2">
                 <Button variant="outline" disabled={!act('offer_room')?.enabled} onClick={openOffer}>
-                  Offer a room
+                  Suggest a room
                 </Button>
                 <Button variant="outline" disabled={!act('request_changes')?.enabled} onClick={() => setMode('changes')}>
                   Ask for changes
@@ -417,8 +388,8 @@ export function RequestPane({ detail, demo, onDone }: RequestPaneProps) {
 
           {mode === 'offer' && (
             <div className="grid gap-3 rounded-lg border border-border p-3">
-              <h3 className="font-semibold">Offer a room</h3>
-              <p className="text-xs text-muted-foreground">The room is held for the club for 24 hours. If they accept, the request moves there.</p>
+              <h3 className="font-semibold">Decline this room and suggest another</h3>
+              <p className="text-xs text-muted-foreground">The club gets an email with this room. We hold it for them for 24 hours. If they accept, the request moves there.</p>
               <ul className="grid max-h-48 gap-1.5 overflow-auto" aria-label="Free rooms">
                 {options.map((o) => (
                   <li key={o.room.id}>
@@ -437,7 +408,7 @@ export function RequestPane({ detail, demo, onDone }: RequestPaneProps) {
               <ReasonField value={reason} onChange={setReason} optional />
               <EmailPreview email={preview} />
               <div className="flex gap-2">
-                <Button disabled={busy || !chosen} onClick={() => run({ action: 'offer_room', roomId: chosen?.id, reason: reason.trim() }, `Room offered to ${organisation.name}.`)}>
+                <Button disabled={busy || !chosen} onClick={() => run({ action: 'offer_room', roomId: chosen?.id, reason: reason.trim() }, `Another room suggested to ${organisation.name}.`)}>
                   Offer {chosen ? chosen.name : 'a room'}
                 </Button>
                 <Button variant="outline" onClick={() => setMode(null)}>
@@ -515,6 +486,50 @@ export function RequestPane({ detail, demo, onDone }: RequestPaneProps) {
           </div>
         </section>
       )}
+
+      <details className="rounded-lg border border-border px-3 py-2">
+        <summary className="cursor-pointer text-sm font-semibold">More details: room timeline, free rooms and the club record</summary>
+        <div className="mt-3 grid gap-4">
+      <section aria-label="Room on this day" className="grid gap-1.5">
+            <h3 className="text-sm font-semibold">
+              {formatVenue(room)} on {formatDate(request.date)}
+            </h3>
+            <RoomTimeline blocks={detail.roomDay} highlightId={request.id} />
+          </section>
+
+          {detail.alternatives.length > 0 && mode === null && request.status !== 'confirmed' && (
+            <section aria-label="Free at the same time" className="grid gap-1.5">
+              <h3 className="text-sm font-semibold">Free at the same time</h3>
+              <ul className="grid gap-1.5">
+                {detail.alternatives.map((a) => (
+                  <li key={a.room.id} className="flex items-center justify-between gap-2 rounded-md border border-border p-2 text-sm">
+                    <span>
+                      <span className="font-medium">{formatVenue(a.room)}</span>
+                      <span className="text-muted-foreground">
+                        {' '}
+                        · {a.room.capacity} seats{a.competing > 0 ? ` · ${a.competing} other request waiting` : ''}
+                      </span>
+                    </span>
+                    {act('offer_room')?.enabled && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setOfferRoom(a.room.id)
+                          void openOffer()
+                        }}
+                      >
+                        Offer
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
+        </div>
+      </details>
 
       <section aria-label="History">
         <button type="button" className="text-sm font-semibold underline" aria-expanded={showHistory} onClick={() => setShowHistory((v) => !v)}>

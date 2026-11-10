@@ -167,6 +167,8 @@ export function SettingsView({ initial, rooms, canEdit, demo }: SettingsViewProp
               ['cap', 'Weekly limit per club (default)', 'defaultWeeklyCap', 1, 50, 'A club at this many bookings in a week gets a flag. Individual clubs can have their own limit.'],
               ['hold', 'Offer hold (hours)', 'offerHoldHours', 1, 168, 'How long an offered room is held for a club before it is released.'],
               ['undo', 'Undo window (seconds)', 'undoSeconds', 0, 120, 'How long an approver can undo a decision.'],
+              ['dur', 'Longest booking (minutes)', 'maxDurationMin', 15, 1440, 'A longer booking gets a flag and needs a look.'],
+              ['window', 'Booking window (days)', 'bookingWindowDays', 1, 365, 'Requests for dates further out than this get a flag.'],
             ] as const).map(([id, label, key, min, max, help]) => (
               <div key={id} className="grid gap-1.5">
                 <Label htmlFor={id}>{label}</Label>

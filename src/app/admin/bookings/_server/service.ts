@@ -17,6 +17,7 @@ import type {
   FreeRoomQuery,
   InboxData,
   InboxFilters,
+  InboxTab,
   InboxRow,
   Lane,
   MonthDay,
@@ -62,6 +63,23 @@ function failure(code: 400 | 403 | 404 | 409, error: string, blockers?: Blocker[
 
 function fromEngineError(e: TransitionError): ServiceResult<never> {
   return failure(e.code, e.error, e.blockers)
+}
+
+function statusText(status: BookingRequest['status']): string {
+  switch (status) {
+    case 'confirmed':
+      return 'Confirmed'
+    case 'pending':
+      return 'With next office'
+    case 'offered':
+      return 'Room offered'
+    case 'changes_requested':
+      return 'Changes needed'
+    case 'rejected':
+      return 'Declined'
+    default:
+      return status
+  }
 }
 
 let idCounter = 0
@@ -417,32 +435,25 @@ export class BookingService {
     const { settings, rooms, organisations, requests } = ctx
     const officeName = settings.offices.find((o) => o.id === actor.actingFor)?.label ?? 'you'
     const q = f.q?.trim().toLowerCase() ?? ''
+    const tab: InboxTab = f.tab ?? 'review'
 
-    const rows: InboxRow[] = []
-    let elsewhere = 0
-    for (const request of requests) {
-      if (request.status === 'pending' && !waitingOnMe(actor, request)) {
-        const idx = request.stages.indexOf(actor.actingFor)
-        if (idx >= 0 && idx < request.stageIndex) elsewhere += 1
-        continue
-      }
-      if (!waitingOnMe(actor, request)) continue
-      if (visibilityOf(actor, request, ctx) !== 'full') continue
+    const build = (request: BookingRequest): InboxRow | null => {
+      if (visibilityOf(actor, request, ctx) !== 'full') return null
       const organisation = organisations.find((o) => o.id === request.organisationId)
       const room = rooms.find((r) => r.id === request.roomId)
-      if (!organisation || !room) continue
-      if (f.office && organisation.officeId !== f.office) continue
-      if (f.building && room.building !== f.building) continue
-      if (f.category && request.category !== f.category) continue
-      if (f.organisationId && request.organisationId !== f.organisationId) continue
+      if (!organisation || !room) return null
+      if (f.office && organisation.officeId !== f.office) return null
+      if (f.building && room.building !== f.building) return null
+      if (f.category && request.category !== f.category) return null
+      if (f.organisationId && request.organisationId !== f.organisationId) return null
       if (q) {
         const hay = `${request.id} ${request.eventName} ${organisation.name} ${room.building} ${room.name}`.toLowerCase()
-        if (!hay.includes(q)) continue
+        if (!hay.includes(q)) return null
       }
       const flags = flagsFor(ctx, request, room, now)
       const lane = laneFor(ctx, request, flags)
       const category = settings.categories.find((c) => c.id === request.category)
-      rows.push({
+      return {
         request,
         organisationName: organisation.name,
         kind: organisation.kind,
@@ -453,28 +464,68 @@ export class BookingService {
         flags,
         overdueDays: Math.floor(overdueHours(ctx, request, now) / 24),
         chip: chipFor(lane, flags),
-      })
+      }
     }
-    rows.sort(
-      (a, b) =>
-        LANE_ORDER[a.lane] - LANE_ORDER[b.lane] ||
-        (b.overdueDays > 0 ? 1 : 0) - (a.overdueDays > 0 ? 1 : 0) ||
-        a.request.date.localeCompare(b.request.date) ||
-        a.request.createdAt.localeCompare(b.request.createdAt),
-    )
+
+    const mine = (r: BookingRequest): boolean => actor.isSuperAdmin || r.stages.includes(actor.actingFor)
+    const myIndex = (r: BookingRequest): number => r.stages.indexOf(actor.actingFor)
+    const inTab: Record<InboxTab, (r: BookingRequest) => boolean> = {
+      review: (r) => waitingOnMe(actor, r),
+      changes: (r) => r.status === 'changes_requested' && mine(r),
+      approved: (r) =>
+        mine(r) &&
+        (r.status === 'confirmed' || (r.status === 'pending' && !waitingOnMe(actor, r) && (actor.isSuperAdmin || myIndex(r) < r.stageIndex)) || r.status === 'offered'),
+      declined: (r) => r.status === 'rejected' && mine(r),
+    }
+
+    const tabCounts: Record<InboxTab, number> = { review: 0, changes: 0, approved: 0, declined: 0 }
+    const rows: InboxRow[] = []
+    let elsewhere = 0
+    for (const request of requests) {
+      if (request.status === 'pending' && !waitingOnMe(actor, request)) {
+        const idx = myIndex(request)
+        if (idx >= 0 && idx < request.stageIndex) elsewhere += 1
+      }
+      for (const key of ['review', 'changes', 'approved', 'declined'] as const) {
+        if (!inTab[key](request) || visibilityOf(actor, request, ctx) !== 'full') continue
+        tabCounts[key] += 1
+        if (key === tab) {
+          const row = build(request)
+          if (row) rows.push(row)
+        }
+      }
+    }
+
+    if (tab === 'review') {
+      rows.sort(
+        (a, b) =>
+          LANE_ORDER[a.lane] - LANE_ORDER[b.lane] ||
+          (b.overdueDays > 0 ? 1 : 0) - (a.overdueDays > 0 ? 1 : 0) ||
+          a.request.date.localeCompare(b.request.date) ||
+          a.request.createdAt.localeCompare(b.request.createdAt),
+      )
+    } else {
+      rows.sort((a, b) => b.request.updatedAt.localeCompare(a.request.updatedAt))
+      for (const r of rows) r.chip = statusText(r.request.status)
+    }
     const counts: Record<Lane, number> = { clash: 0, look: 0, clear: 0 }
-    for (const r of rows) counts[r.lane] += 1
-    const filtered = f.lane ? rows.filter((r) => r.lane === f.lane) : rows
+    if (tab === 'review') for (const r of rows) counts[r.lane] += 1
+    const filtered = tab === 'review' && f.lane ? rows.filter((r) => r.lane === f.lane) : rows
     const page = Math.max(1, f.page ?? 1)
-    const total = rows.length
+    const total = tabCounts.review
     return {
+      tab,
+      tabCounts,
       rows: filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
       counts,
       elsewhere,
       page,
       pageSize: PAGE_SIZE,
       total: filtered.length,
-      summary: `${total} ${total === 1 ? 'request is' : 'requests are'} waiting on ${officeName}. ${counts.clear} ${counts.clear === 1 ? 'has' : 'have'} nothing to check.`,
+      summary:
+        total === 0
+          ? `Nothing is waiting on ${officeName}.`
+          : `${total} ${total === 1 ? 'request is' : 'requests are'} waiting on ${officeName}.`,
     }
   }
 

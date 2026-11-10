@@ -27,6 +27,7 @@ export const actionInputSchema = z.object({
 })
 
 export const inboxFiltersSchema = z.object({
+  tab: z.enum(['review', 'changes', 'approved', 'declined']).optional(),
   lane: z.enum(['clash', 'look', 'clear']).optional(),
   q: z.string().max(80).optional(),
   office: officeIdSchema.optional(),
@@ -143,6 +144,8 @@ export const settingsSchema = z
     offerHoldHours: z.number().int().min(1).max(168),
     undoSeconds: z.number().int().min(0).max(120),
     defaultWeeklyCap: z.number().int().min(1).max(50),
+    maxDurationMin: z.number().int().min(15).max(1440),
+    bookingWindowDays: z.number().int().min(1).max(365),
   })
   .superRefine((value, ctx) => {
     const finals = new Set(value.offices.filter((o) => o.isFinal).map((o) => o.id))

@@ -1,6 +1,5 @@
 import { redirect } from 'next/navigation'
 import { BookingBar } from './_components/demo-bar'
-import { NavStrip } from './_components/nav-strip'
 import { resolveActor } from './_server/actor'
 import { isDemoMode } from './_server/offices'
 import { getBookingService } from './_server/service'
@@ -15,7 +14,6 @@ export default async function BookingsLayout({ children }: { children: React.Rea
   const demo = isDemoMode()
   const [settings, rooms, organisations] = await Promise.all([service.getSettings(), service.listRooms(), service.listOrganisations()])
   const clock = service.clockState()
-  const counts = await service.counts(actor)
 
   return (
     <div className="booking-scope mx-auto flex w-full max-w-[1500px] flex-col gap-4 pb-8">
@@ -32,7 +30,6 @@ export default async function BookingsLayout({ children }: { children: React.Rea
           today: service.today(),
         }}
       />
-      <NavStrip inbox={counts.inbox} clashes={counts.clashes} />
       {children}
     </div>
   )

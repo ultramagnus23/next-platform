@@ -249,6 +249,10 @@ export interface BookingSettings {
   offerHoldHours: number
   undoSeconds: number
   defaultWeeklyCap: number
+  /** Longest single booking a club may ask for, in minutes. */
+  maxDurationMin: number
+  /** How far ahead a booking may be requested, in days. */
+  bookingWindowDays: number
 }
 
 /* ------------------------------------------------------------------ */
@@ -414,6 +418,8 @@ export type FlagKind =
   | 'room_not_for_clubs'
   | 'poor_record'
   | 'reopened'
+  | 'too_long'
+  | 'too_far_ahead'
   | 'overdue'
 
 export interface Flag {
@@ -488,7 +494,10 @@ export type ServiceResult<T> =
   | { ok: true; data: T }
   | { ok: false; code: 400 | 403 | 404 | 409; error: string; blockers?: Blocker[] }
 
+export type InboxTab = 'review' | 'changes' | 'approved' | 'declined'
+
 export interface InboxFilters {
+  tab?: InboxTab
   lane?: Lane
   q?: string
   office?: OfficeId
@@ -513,6 +522,8 @@ export interface InboxRow {
 }
 
 export interface InboxData {
+  tab: InboxTab
+  tabCounts: Record<InboxTab, number>
   rows: InboxRow[]
   counts: Record<Lane, number>
   /** Requests the actor already passed on, still waiting elsewhere. */

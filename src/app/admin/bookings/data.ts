@@ -15,9 +15,9 @@ export const PERSONAS: ReadonlyArray<{ id: PersonaId; label: string }> = [
 ]
 
 export const LANE_TEXT: Record<Lane, { title: string; blurb: string }> = {
-  clash: { title: 'Clashes', blurb: 'Another request wants the same room and time.' },
-  look: { title: 'Needs a look', blurb: 'Over capacity, short notice, or the club is at its weekly limit.' },
-  clear: { title: 'Clear to approve', blurb: 'Room free, big enough, inside the rules. Safe to approve together.' },
+  clash: { title: 'Clashes', blurb: 'Someone else wants the same room and time.' },
+  look: { title: 'Needs a look', blurb: 'Has a warning, such as too many people or short notice.' },
+  clear: { title: 'Clear to approve', blurb: 'Nothing to check. Safe to approve together.' },
 }
 
 export const QUICK_REASONS: ReadonlyArray<string> = [

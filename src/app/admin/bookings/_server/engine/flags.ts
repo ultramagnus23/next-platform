@@ -8,7 +8,7 @@ import type {
   OrgStanding,
   Room,
 } from '../../types'
-import { eventStartMs, formatMinutes, isoWeekKey, todayIST } from '../../utils'
+import { daysBetween, eventStartMs, formatMinutes, isoWeekKey, todayIST } from '../../utils'
 import { clashesFor } from './occupancy'
 
 /** Flags, lanes and organisation standing. Pure: `now` is always passed in. */
@@ -110,6 +110,24 @@ export function flagsFor(ctx: EngineContext, request: BookingRequest, room: Room
     }
   }
 
+  if (request.endMin - request.startMin > settings.maxDurationMin) {
+    const hours = Math.round(((request.endMin - request.startMin) / 60) * 10) / 10
+    flags.push({
+      kind: 'too_long',
+      title: `Longer than ${Math.round(settings.maxDurationMin / 60)} hours`,
+      body: `The booking is ${hours} hours. The usual limit for one booking is ${Math.round(settings.maxDurationMin / 60)} hours.`,
+    })
+  }
+
+  const daysAhead = daysBetween(todayIST(now), request.date)
+  if (daysAhead > settings.bookingWindowDays) {
+    flags.push({
+      kind: 'too_far_ahead',
+      title: `${daysAhead} days ahead`,
+      body: `Bookings can be made up to ${settings.bookingWindowDays} days ahead.`,
+    })
+  }
+
   if (request.previous) {
     flags.push({
       kind: 'reopened',
@@ -140,6 +158,8 @@ export const FLAG_CHIP: Record<FlagKind, string> = {
   room_not_for_clubs: 'Classes-only room',
   poor_record: 'Poor record',
   reopened: 'Changed',
+  too_long: 'Long booking',
+  too_far_ahead: 'Too far ahead',
   overdue: 'Overdue',
 }
 
