@@ -4,6 +4,9 @@ import { RequestsView } from '../_components/requests-view'
 import { resolveActor } from '../_server/actor'
 import { getBookingService } from '../_server/service'
 import { requestFiltersSchema } from '../schema'
+import { todayIST } from '../utils'
+
+const PAGE_SIZE = 50
 
 export const dynamic = 'force-dynamic'
 
@@ -26,6 +29,7 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
   const filters = parsed.success ? parsed.data : requestFiltersSchema.parse({})
 
   const service = getBookingService()
+  const page = filters.page ?? 1
   const [{ rows, counts }, rooms, organisations, settings] = await Promise.all([
     service.listRequests(actor, filters),
     service.listRooms(),
@@ -41,7 +45,11 @@ export default async function RequestsPage({ searchParams }: { searchParams: Pro
         crumbs={[{ label: 'Requests' }]}
       />
       <RequestsView
-        rows={rows}
+        rows={rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)}
+        total={rows.length}
+        page={page}
+        pageSize={PAGE_SIZE}
+        today={todayIST(new Date().toISOString())}
         counts={counts}
         filters={filters}
         options={{

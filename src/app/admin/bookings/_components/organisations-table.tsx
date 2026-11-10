@@ -5,7 +5,9 @@ import { useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp } from 'lucide-react'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import type { OrganisationStats } from '../types'
+import { Input } from '@/components/ui/input'
 import { formatTimestamp } from '../utils'
+import { OrgChip } from './badges'
 
 export interface OrganisationRow extends OrganisationStats {
   authorityLabel: string
@@ -41,9 +43,11 @@ function valueOf(row: OrganisationRow, key: SortKey): string | number {
 
 export function OrganisationsTable({ rows }: { rows: OrganisationRow[] }) {
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'requests', dir: 'desc' })
+  const [filter, setFilter] = useState('')
 
   const sorted = useMemo(() => {
-    const list = [...rows]
+    const q = filter.trim().toLowerCase()
+    const list = rows.filter((r) => !q || r.organisation.code.toLowerCase().startsWith(q) || r.organisation.name.toLowerCase().includes(q))
     list.sort((a, b) => {
       const av = valueOf(a, sort.key)
       const bv = valueOf(b, sort.key)
@@ -51,7 +55,7 @@ export function OrganisationsTable({ rows }: { rows: OrganisationRow[] }) {
       return sort.dir === 'asc' ? cmp : -cmp
     })
     return list
-  }, [rows, sort])
+  }, [rows, sort, filter])
 
   function toggle(key: SortKey) {
     setSort((prev) => (prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }))
@@ -59,6 +63,15 @@ export function OrganisationsTable({ rows }: { rows: OrganisationRow[] }) {
 
   return (
     <>
+      <Input
+        type="search"
+        autoComplete="off"
+        placeholder="Filter by code or name…"
+        aria-label="Filter organisations"
+        className="max-w-sm"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+      />
       <div className="hidden overflow-x-auto rounded-lg border border-border md:block">
         <Table>
           <TableHeader>
@@ -78,8 +91,8 @@ export function OrganisationsTable({ rows }: { rows: OrganisationRow[] }) {
             {sorted.map((row) => (
               <TableRow key={row.organisation.id}>
                 <TableCell className="font-medium">
-                  <Link href={`/admin/bookings/requests?tab=all&organisationId=${row.organisation.id}`} className="hover:underline">
-                    {row.organisation.name}
+                  <Link href={`/admin/bookings/organisations/${row.organisation.code.toLowerCase()}`} className="hover:underline">
+                    <OrgChip code={row.organisation.code} colour={row.organisation.colour} name={row.organisation.name} />
                   </Link>
                 </TableCell>
                 <TableCell>{row.authorityLabel}</TableCell>
@@ -100,10 +113,10 @@ export function OrganisationsTable({ rows }: { rows: OrganisationRow[] }) {
         {sorted.map((row) => (
           <li key={row.organisation.id}>
             <Link
-              href={`/admin/bookings/requests?tab=all&organisationId=${row.organisation.id}`}
+              href={`/admin/bookings/organisations/${row.organisation.code.toLowerCase()}`}
               className="block rounded-lg border border-border bg-card p-3 hover:bg-accent/40"
             >
-              <p className="font-medium">{row.organisation.name}</p>
+              <OrgChip code={row.organisation.code} colour={row.organisation.colour} name={row.organisation.name} />
               <p className="text-xs text-muted-foreground">{row.authorityLabel}</p>
               <p className="mt-2 text-sm">
                 {row.requests} requests · {row.confirmed} confirmed · {row.rejected} rejected

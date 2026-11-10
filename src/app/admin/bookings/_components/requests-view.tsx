@@ -2,7 +2,8 @@
 
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
-import { useCallback } from 'react'
+import { Fragment, useCallback } from 'react'
+import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -11,8 +12,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { STAGE_OPTIONS, STATUS_OPTIONS, TAB_LABELS } from '../data'
 import type { CategoryId, RequestFilters, RequestRow, RequestTab } from '../types'
-import { formatDate, formatRange } from '../utils'
-import { CategoryBadge, ConflictBadge, StatusBadge, TierChip } from './badges'
+import { addDays, formatDate, formatRange } from '../utils'
+import { CategoryBadge, ConflictBadge, OrgChip, StatusBadge, TierChip } from './badges'
 
 export interface RequestFilterOptions {
   organisations: Array<{ id: string; name: string }>
@@ -23,6 +24,10 @@ export interface RequestFilterOptions {
 
 interface RequestsViewProps {
   rows: RequestRow[]
+  total: number
+  page: number
+  pageSize: number
+  today: string
   counts: Record<RequestTab, number>
   filters: RequestFilters
   options: RequestFilterOptions
@@ -31,12 +36,13 @@ interface RequestsViewProps {
 const ALL = 'all'
 const TABS: RequestTab[] = ['needs_action', 'others', 'confirmed', 'closed', 'all']
 
-export function RequestsView({ rows, counts, filters, options }: RequestsViewProps) {
+export function RequestsView({ rows, total, page, pageSize, today, counts, filters, options }: RequestsViewProps) {
   const router = useRouter()
   const pathname = usePathname()
 
   const update = useCallback(
-    (patch: Record<string, string | undefined>) => {
+    (rawPatch: Record<string, string | undefined>) => {
+      let patch = rawPatch
       const params = new URLSearchParams()
       const current: Record<string, string | undefined> = {
         tab: filters.tab,
@@ -49,7 +55,9 @@ export function RequestsView({ rows, counts, filters, options }: RequestsViewPro
         status: filters.status,
         stage: filters.stage,
         conflictsOnly: filters.conflictsOnly ? 'true' : undefined,
+        page: filters.page ? String(filters.page) : undefined,
       }
+      if (!('page' in patch)) patch = { ...patch, page: undefined }
       for (const [key, value] of Object.entries({ ...current, ...patch })) {
         if (value && value !== ALL) params.set(key, value)
       }
@@ -101,6 +109,22 @@ export function RequestsView({ rows, counts, filters, options }: RequestsViewPro
           </TabsList>
         </div>
       </Tabs>
+
+      <div className="flex flex-wrap items-center gap-2" aria-label="Quick filters" role="group">
+        <span className="text-sm text-muted-foreground">Quick filters</span>
+        <Button size="sm" variant={filters.dateFrom === today && filters.dateTo === today ? 'default' : 'outline'} onClick={() => update({ dateFrom: today, dateTo: today })}>
+          Today
+        </Button>
+        <Button size="sm" variant={filters.dateFrom === today && filters.dateTo === addDays(today, 7) ? 'default' : 'outline'} onClick={() => update({ dateFrom: today, dateTo: addDays(today, 7) })}>
+          Next 7 days
+        </Button>
+        <Button size="sm" variant={filters.conflictsOnly ? 'default' : 'outline'} onClick={() => update({ conflictsOnly: filters.conflictsOnly ? undefined : 'true' })}>
+          Conflicts
+        </Button>
+        <Button size="sm" variant="ghost" onClick={() => update({ dateFrom: undefined, dateTo: undefined, conflictsOnly: undefined, organisationId: undefined, building: undefined, roomId: undefined, category: undefined, status: undefined, stage: undefined })}>
+          Clear all
+        </Button>
+      </div>
 
       <section
         aria-label="Filters"
@@ -195,14 +219,24 @@ export function RequestsView({ rows, counts, filters, options }: RequestsViewPro
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map((row) => (
+                {rows.map((row, index) => (
+                  <Fragment key={row.request.id}>
+                    {(index === 0 || rows[index - 1]?.request.date !== row.request.date) && (
+                      <TableRow className="bg-muted/40 hover:bg-muted/40">
+                        <TableCell colSpan={12} className="py-1.5 text-xs font-semibold">
+                          {row.request.date === today ? 'Today · ' : ''}
+                          {formatDate(row.request.date)} · {rows.filter((r) => r.request.date === row.request.date).length} on this page
+                        </TableCell>
+                      </TableRow>
+                    )}
                   <TableRow
-                    key={row.request.id}
                     className="cursor-pointer"
                     onClick={() => router.push(`/admin/bookings/requests/${row.request.id}`)}
                   >
                     <TableCell className="whitespace-nowrap font-mono text-xs">{row.request.id}</TableCell>
-                    <TableCell className="whitespace-nowrap">{row.organisationName}</TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      <OrgChip code={row.organisation.code} colour={row.organisation.colour} name={row.organisationName} />
+                    </TableCell>
                     <TableCell className="min-w-44 font-medium">
                       <Link
                         href={`/admin/bookings/requests/${row.request.id}`}
@@ -232,6 +266,7 @@ export function RequestsView({ rows, counts, filters, options }: RequestsViewPro
                       <ConflictBadge count={row.conflictCount} />
                     </TableCell>
                   </TableRow>
+                  </Fragment>
                 ))}
               </TableBody>
             </Table>
@@ -248,7 +283,7 @@ export function RequestsView({ rows, counts, filters, options }: RequestsViewPro
                     <p className="font-medium">{row.request.eventName}</p>
                     <StatusBadge status={row.request.status} />
                   </div>
-                  <p className="mt-0.5 text-sm text-muted-foreground">{row.organisationName}</p>
+                  <div className="mt-0.5"><OrgChip code={row.organisation.code} colour={row.organisation.colour} name={row.organisationName} /></div>
                   <p className="mt-2 text-sm">
                     {formatDate(row.request.date)}, {formatRange(row.request.startMin, row.request.endMin)}
                   </p>
@@ -265,6 +300,21 @@ export function RequestsView({ rows, counts, filters, options }: RequestsViewPro
               </li>
             ))}
           </ul>
+          {total > pageSize && (
+            <nav aria-label="Pages" className="flex items-center justify-between gap-2 text-sm">
+              <span className="text-muted-foreground">
+                {(page - 1) * pageSize + 1} to {Math.min(page * pageSize, total)} of {total}
+              </span>
+              <span className="flex gap-2">
+                <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => update({ page: String(page - 1) })}>
+                  Previous
+                </Button>
+                <Button size="sm" variant="outline" disabled={page * pageSize >= total} onClick={() => update({ page: String(page + 1) })}>
+                  Next
+                </Button>
+              </span>
+            </nav>
+          )}
         </>
       )}
     </div>

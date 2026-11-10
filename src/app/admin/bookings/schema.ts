@@ -66,6 +66,7 @@ export const requestFiltersSchema = z.object({
     .enum(['true', 'false', '1', '0'])
     .optional()
     .transform((v) => v === 'true' || v === '1'),
+  page: z.coerce.number().int().min(1).max(500).optional(),
 })
 
 export const resolveSchema = z.object({

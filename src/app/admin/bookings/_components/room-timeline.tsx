@@ -5,6 +5,8 @@ import { formatClock, formatRange, statusLabel } from '../utils'
 interface RoomTimelineProps {
   blocks: TimelineBlock[]
   highlightId?: string
+  /** Organisation id to code, so each block starts with its moniker. */
+  codes?: Record<string, string>
   startHour?: number
   endHour?: number
   className?: string
@@ -24,7 +26,7 @@ export const BLOCK_STYLES: Record<RequestStatus, string> = {
  * One room, one day. Blocks sit on a shared time axis: confirmed solid,
  * pending outlined, changes requested dashed, conflicts in a red ring.
  */
-export function RoomTimeline({ blocks, highlightId, startHour = 8, endHour = 23, className }: RoomTimelineProps) {
+export function RoomTimeline({ blocks, highlightId, codes, startHour = 8, endHour = 23, className }: RoomTimelineProps) {
   const from = startHour * 60
   const span = (endHour - startHour) * 60
   const hours = Array.from({ length: endHour - startHour + 1 }, (_, i) => startHour + i)
@@ -71,7 +73,7 @@ export function RoomTimeline({ blocks, highlightId, startHour = 8, endHour = 23,
                   )}
                   style={{ left: `${left}%`, width: `${Math.max(right - left, 1)}%` }}
                 >
-                  <span className="truncate">{block.eventName}</span>
+                  <span className="truncate">{codes?.[block.organisationId] ? `${codes[block.organisationId]} · ` : ''}{block.eventName}</span>
                 </div>
               )
             })}

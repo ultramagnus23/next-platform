@@ -9,6 +9,10 @@ import type {
   CalendarData,
   CalendarFilters,
   CalendarItem,
+  QueueGroup,
+  RoomBoardItem,
+  RoomHolder,
+  SearchHit,
   ConflictGroupView,
   ConflictMemberView,
   EngineContext,
@@ -354,6 +358,7 @@ export class BookingService {
       const stageName = settings.authorities.find((a) => a.id === stage)?.shortLabel ?? ''
       rows.push({
         request,
+        organisation: org,
         organisationName: org.name,
         authorityId: org.authorityId,
         roomLabel: `${room.building} · ${room.name}`,
@@ -467,6 +472,121 @@ export class BookingService {
         lastRequestAt: own.map((r) => r.createdAt).sort().pop() ?? null,
       }
     })
+  }
+
+  /** Everything that needs this actor, grouped by organisation and ordered by urgency. */
+  async getWorkQueue(actor: Actor): Promise<{ groups: QueueGroup[]; total: number }> {
+    const ctx = await this.loadContext()
+    const { settings, rooms, organisations, requests } = ctx
+    const today = todayIST(this.clock())
+    const byOrg = new Map<string, QueueGroup>()
+    let total = 0
+    for (const request of requests) {
+      if (!needsMyAction(actor, request)) continue
+      if (visibilityOf(actor, request, requests, settings) !== 'full') continue
+      const organisation = organisations.find((o) => o.id === request.organisationId)
+      const room = rooms.find((r) => r.id === request.roomId)
+      if (!organisation || !room) continue
+      const conflictCount = conflictsFor(request.id, requests, settings).length
+      const warnings = warningsFor(request, room).map((w) => w.code)
+      const category = settings.categories.find((c) => c.id === request.category)
+      const clean = conflictCount === 0 && warnings.every((w) => w === 'short_notice')
+      const actions = availableActions(request, actor, ctx)
+      const approve = actions.find((a) => a.action === 'approve')
+      const row = {
+        request,
+        roomLabel: `${room.building} · ${room.name}`,
+        categoryLabel: category?.label ?? request.category,
+        tier: category?.tier ?? 99,
+        conflictCount,
+        warnings,
+        daysAway: Math.round((Date.parse(`${request.date}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000),
+        canQuickApprove: clean && approve?.enabled === true,
+        approveLabel: approve?.label ?? 'Approve',
+      }
+      const group = byOrg.get(organisation.id) ?? { organisation, rows: [], urgency: 0 }
+      group.rows.push(row)
+      byOrg.set(organisation.id, group)
+      total += 1
+    }
+    const groups = [...byOrg.values()]
+    for (const g of groups) {
+      g.rows.sort((a, b) => a.request.date.localeCompare(b.request.date) || a.request.startMin - b.request.startMin)
+      // Lower is more urgent: soonest event, conflicts pull a group up.
+      const first = g.rows[0]
+      g.urgency = (first?.daysAway ?? 99) - (g.rows.some((r) => r.conflictCount > 0) ? 2 : 0)
+    }
+    groups.sort((a, b) => a.urgency - b.urgency || b.rows.length - a.rows.length || a.organisation.code.localeCompare(b.organisation.code))
+    return { groups, total }
+  }
+
+  async getRoomsBoard(actor: Actor): Promise<{ today: string; items: RoomBoardItem[]; organisations: Organisation[] }> {
+    void actor
+    const ctx = await this.loadContext()
+    const { settings, rooms, organisations, requests } = ctx
+    const nowIso = this.clock()
+    const today = todayIST(nowIso)
+    const local = new Date(Date.parse(nowIso) + IST_OFFSET_MIN * 60_000)
+    const nowMin = local.getUTCHours() * 60 + local.getUTCMinutes()
+    const groups = findConflictGroups(requests, settings)
+
+    const holder = (r: BookingRequest): RoomHolder => {
+      const org = organisations.find((o) => o.id === r.organisationId)
+      return {
+        requestId: r.id,
+        eventName: r.eventName,
+        organisationCode: org?.code ?? '???',
+        organisationColour: org?.colour ?? 'slate',
+        startMin: r.startMin,
+        endMin: r.endMin,
+      }
+    }
+    const items: RoomBoardItem[] = rooms.map((room) => {
+      const todays = requests.filter((r) => r.roomId === room.id && r.date === today)
+      const confirmed = todays.filter((r) => r.status === 'confirmed').sort((a, b) => a.startMin - b.startMin)
+      const booked = confirmed.reduce((sum, r) => sum + (r.endMin - r.startMin), 0)
+      const open = room.openUntilMin - room.openFromMin
+      const current = confirmed.find((r) => r.startMin <= nowMin && nowMin < r.endMin)
+      const upcoming = confirmed.find((r) => r.startMin > nowMin)
+      return {
+        room,
+        now: current ? holder(current) : null,
+        next: upcoming ? holder(upcoming) : null,
+        utilisationPercent: open === 0 ? 0 : Math.round((booked / open) * 100),
+        pendingToday: todays.filter((r) => r.status === 'pending').length,
+        conflictToday: groups.some((g) => g.roomId === room.id && g.date === today && g.isOpen),
+      }
+    })
+    return { today, items, organisations }
+  }
+
+  /** Quick lookup across organisations, requests and rooms for the search box. */
+  async search(actor: Actor, query: string): Promise<SearchHit[]> {
+    const q = query.trim().toLowerCase()
+    if (q.length === 0) return []
+    const ctx = await this.loadContext()
+    const { settings, rooms, organisations, requests } = ctx
+    const hits: SearchHit[] = []
+    for (const o of organisations) {
+      if (o.code.toLowerCase().startsWith(q) || o.name.toLowerCase().includes(q)) {
+        hits.push({ kind: 'organisation', label: o.name, detail: `${o.code} · ${o.authorityId.toUpperCase()}`, href: `/admin/bookings/organisations/${o.code.toLowerCase()}`, code: o.code, colour: o.colour })
+      }
+    }
+    for (const r of rooms) {
+      const squash = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, '')
+      if (squash(`${r.building} ${r.name} ${r.floor}`).includes(squash(q)) || squash(`${r.building}${r.name}`).includes(squash(q))) {
+        hits.push({ kind: 'room', label: `${r.building} · ${r.floor} floor · ${r.name}`, detail: `${r.capacity} seats`, href: `/admin/bookings/rooms/${r.id}` })
+      }
+    }
+    for (const request of requests) {
+      if (visibilityOf(actor, request, requests, settings) === 'none') continue
+      const org = organisations.find((o) => o.id === request.organisationId)
+      const haystack = `${request.id} ${request.eventName} ${org?.name ?? ''} ${org?.code ?? ''}`.toLowerCase()
+      if (!haystack.includes(q)) continue
+      hits.push({ kind: 'request', label: request.eventName, detail: `${request.id} · ${org?.code ?? ''} · ${request.date}`, href: `/admin/bookings/requests/${request.id}`, code: org?.code, colour: org?.colour })
+      if (hits.length > 40) break
+    }
+    return hits.slice(0, 12)
   }
 
   async getOverview(actor: Actor): Promise<OverviewData> {
@@ -613,6 +733,8 @@ export class BookingService {
         id: r.id,
         eventName: r.eventName,
         organisationName: organisations.find((o) => o.id === r.organisationId)?.name ?? r.organisationId,
+        organisationCode: organisations.find((o) => o.id === r.organisationId)?.code ?? '???',
+        organisationColour: organisations.find((o) => o.id === r.organisationId)?.colour ?? 'slate',
         roomId: r.roomId,
         date: r.date,
         startMin: r.startMin,

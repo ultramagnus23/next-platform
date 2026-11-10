@@ -1,4 +1,4 @@
-import type { Actor, AuthorityId, BookingSettings, Organisation, PersonaId, Room } from '../../types'
+import type { Actor, AuthorityId, BookingSettings, OrgColour, Organisation, PersonaId, Room } from '../../types'
 
 /**
  * Placeholder reference data. Every name and email here is invented for the
@@ -140,23 +140,23 @@ export function buildRooms(): Room[] {
   return rooms
 }
 
-function org(id: string, name: string, authorityId: AuthorityId, handle: string): Organisation {
-  return { id, name, authorityId, contactEmail: `${handle}@${DOMAIN}` }
+function org(id: string, name: string, code: string, colour: OrgColour, authorityId: AuthorityId, handle: string): Organisation {
+  return { id, name, code, colour, authorityId, contactEmail: `${handle}@${DOMAIN}` }
 }
 
 export function buildOrganisations(): Organisation[] {
   return [
-    org('org-cs', 'CS Society', 'slo', 'cs.society'),
-    org('org-cultural', 'Cultural Society', 'oa', 'cultural.society'),
-    org('org-econ', 'Economics Society', 'slo', 'econ.society'),
-    org('org-debate', 'Debating Society', 'slo', 'debating.society'),
-    org('org-ecell', 'Entrepreneurship Cell', 'cfe', 'ecell'),
-    org('org-music', 'Music Club', 'oa', 'music.club'),
-    org('org-dance', 'Dance Society', 'oa', 'dance.society'),
-    org('org-quiz', 'Quiz Club', 'slo', 'quiz.club'),
-    org('org-photo', 'Photography Club', 'slo', 'photography.club'),
-    org('org-film', 'Film Club', 'slo', 'film.club'),
-    org('org-acad', 'Academic Office', 'acad', 'academic.office'),
+    org('org-cs', 'CS Society', 'CSS', 'indigo', 'slo', 'cs.society'),
+    org('org-cultural', 'Cultural Society', 'CUL', 'fuchsia', 'oa', 'cultural.society'),
+    org('org-econ', 'Economics Society', 'ECO', 'emerald', 'slo', 'econ.society'),
+    org('org-debate', 'Debating Society', 'DEB', 'orange', 'slo', 'debating.society'),
+    org('org-ecell', 'Entrepreneurship Cell', 'ECL', 'amber', 'cfe', 'ecell'),
+    org('org-music', 'Music Club', 'MUS', 'violet', 'oa', 'music.club'),
+    org('org-dance', 'Dance Society', 'DAN', 'rose', 'oa', 'dance.society'),
+    org('org-quiz', 'Quiz Club', 'QUZ', 'teal', 'slo', 'quiz.club'),
+    org('org-photo', 'Photography Club', 'PHO', 'sky', 'slo', 'photography.club'),
+    org('org-film', 'Film Club', 'FLM', 'lime', 'slo', 'film.club'),
+    org('org-acad', 'Academic Office', 'ACA', 'slate', 'acad', 'academic.office'),
   ]
 }
 

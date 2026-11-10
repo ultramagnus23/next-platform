@@ -16,7 +16,7 @@ import type {
   Room,
 } from '../types'
 import { formatDate, formatRange, formatTimestamp, formatVenue, relativeTime, statusLabel } from '../utils'
-import { CategoryBadge, ConflictBadge, FlagBadge, StatusBadge, TierChip } from './badges'
+import { CategoryBadge, ConflictBadge, FlagBadge, OrgChip, StatusBadge, TierChip } from './badges'
 
 /* ---------------- Header ---------------- */
 
@@ -66,7 +66,8 @@ export function EventCard({ detail, authorityLabel }: { detail: RequestDetail; a
       <CardContent className="grid gap-4">
         <dl className="grid gap-4 sm:grid-cols-2">
           <Field label="Organisation">
-            {organisation.name} <span className="text-muted-foreground">({authorityLabel})</span>
+            <OrgChip code={organisation.code} colour={organisation.colour} name={organisation.name} />{' '}
+            <span className="text-muted-foreground">({authorityLabel})</span>
           </Field>
           <Field label="Submitted by">{request.submittedBy}</Field>
           <Field label="Date and time">

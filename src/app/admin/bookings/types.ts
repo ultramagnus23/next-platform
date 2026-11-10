@@ -45,9 +45,17 @@ export interface Room {
   openUntilMin: number
 }
 
+/** Fixed palette so a code always shows in the same colour. */
+export type OrgColour =
+  | 'red' | 'orange' | 'amber' | 'lime' | 'emerald' | 'teal'
+  | 'sky' | 'indigo' | 'violet' | 'fuchsia' | 'rose' | 'slate'
+
 export interface Organisation {
   id: string
   name: string
+  /** Short moniker shown on every booking, filter and calendar block. 2 to 4 capitals. */
+  code: string
+  colour: OrgColour
   authorityId: AuthorityId
   contactEmail: string
 }
@@ -366,10 +374,13 @@ export interface RequestFilters {
   status?: RequestStatus
   stage?: AuthorityId
   conflictsOnly?: boolean
+  /** 1-based. Used by the Requests page only. */
+  page?: number
 }
 
 export interface RequestRow {
   request: BookingRequest
+  organisation: Organisation
   organisationName: string
   authorityId: AuthorityId
   roomLabel: string
@@ -499,6 +510,8 @@ export interface CalendarItem {
   id: string
   eventName: string
   organisationName: string
+  organisationCode: string
+  organisationColour: OrgColour
   roomId: string
   date: string
   startMin: number
@@ -550,4 +563,62 @@ export interface OverviewData {
   nextUp: RoomUsageItem[]
   utilisationPercent: number
   activity: ActivityItem[]
+}
+
+/* ------------------------------------------------------------------ */
+/* Work queue and search                                               */
+/* ------------------------------------------------------------------ */
+
+export interface QueueRow {
+  request: BookingRequest
+  roomLabel: string
+  categoryLabel: string
+  tier: number
+  conflictCount: number
+  warnings: WarningCode[]
+  /** Whole days from today to the event. Negative means past. */
+  daysAway: number
+  /** True when nothing needs a second look: no conflict, no capacity or hours problem. */
+  canQuickApprove: boolean
+  approveLabel: string
+}
+
+export interface QueueGroup {
+  organisation: Organisation
+  rows: QueueRow[]
+  urgency: number
+}
+
+export interface SearchHit {
+  kind: 'organisation' | 'room' | 'request'
+  label: string
+  detail: string
+  href: string
+  code?: string
+  colour?: OrgColour
+}
+
+/* ------------------------------------------------------------------ */
+/* Rooms board                                                         */
+/* ------------------------------------------------------------------ */
+
+export interface RoomHolder {
+  requestId: string
+  eventName: string
+  organisationCode: string
+  organisationColour: OrgColour
+  startMin: number
+  endMin: number
+}
+
+export interface RoomBoardItem {
+  room: Room
+  /** Confirmed booking in progress right now. */
+  now: RoomHolder | null
+  /** Next confirmed booking later today. */
+  next: RoomHolder | null
+  /** Share of the room's open hours that are confirmed today. */
+  utilisationPercent: number
+  pendingToday: number
+  conflictToday: boolean
 }

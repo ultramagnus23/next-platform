@@ -4,8 +4,10 @@ Admin side of the room booking system, at `/admin/bookings`. The spec is `PRD.md
 
 ## Current state
 
-Built and working in demo mode: Overview, Requests, Request detail with every action, Conflicts with
-the resolve flow, Calendar (day, week, month), Organisations, Outbox and Settings. All data is
+Built and working in demo mode: Today's work (queue grouped by organisation), global search, Requests,
+Request detail with every action, Conflicts with the resolve flow, Rooms board, Calendar (day, week,
+month), Organisation directory and profiles, Outbox and Settings. Organisations carry a short code and
+colour (see PRD section 14). All data is
 in memory. No email is sent and there is no AMS link.
 
 Not built: the organisation-facing portal, Strapi collections, real mail sending, recurring

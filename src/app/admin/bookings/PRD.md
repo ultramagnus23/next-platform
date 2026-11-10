@@ -235,3 +235,19 @@ cross-authority conflicts; final approval is guarded by lock and version; overri
 super admin with a reason; every transition writes audit and outbox; outbox is rendered, not
 sent; auto-approval exists but is off; "confirmed" means ready for AMS (simulated); half-open
 time intervals in IST; no map or recurring bookings; fork cleanup happens after the demo.
+
+## 14. Admin experience v2 (added 10 Nov 2026)
+
+Why: at hundreds of bookings a day, a flat list does not let an admin see who is booking what.
+
+| Change | Detail |
+|--------|--------|
+| Organisation monikers | Every organisation has a 2 to 4 letter `code` and a fixed `colour` (for example CSS, indigo). The code appears on every booking row, calendar block, conflict card, search result and room card. New fields on the Strapi `organisations` collection: `booking_code`, `booking_colour`. |
+| Home is a work queue | `/admin/bookings` shows only what needs the signed-in admin, grouped by organisation and ordered by urgency (soonest event, conflicts first). Clean requests have an inline Forward button. A role banner states which office the admin acts for and what they can do. |
+| Global search | One box (press `/`) finds organisations by code or name, rooms by building and number, and bookings by id or event. `GET /api/admin/bookings/search?q=`. |
+| Organisation pages | `/admin/bookings/organisations` is a searchable directory. `/admin/bookings/organisations/[code]` shows figures, what is waiting, upcoming and history. |
+| Rooms board | `/admin/bookings/rooms` groups rooms by building and floor with free or in use now, who holds it, what is next and how full it is today. `/admin/bookings/rooms/[roomId]` shows seven days of timelines. |
+| Requests | Grouped by date, quick filters (Today, Next 7 days, Conflicts), 50 per page. |
+| Sidebar | Work (Today's work, Conflicts), Browse (All requests, Organisations, Rooms, Calendar), Records (Outbox, Settings). |
+
+The repository was also reduced to this portal only: sign-in, the admin shell and the booking code remain.

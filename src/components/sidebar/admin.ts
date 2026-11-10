@@ -1,6 +1,7 @@
 import {
   Building2,
   CalendarDays,
+  DoorOpen,
   ClipboardList,
   GitCompareArrows,
   LayoutDashboard,
@@ -34,14 +35,27 @@ export const adminSidebar: SidebarInterface = {
   roles,
   categories: [
     {
-      id: "bookings",
-      title: "Bookings",
+      id: "work",
+      title: "Work",
       items: [
-        { title: "Overview", icon: LayoutDashboard, href: "/bookings", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
-        { title: "Requests", icon: ClipboardList, href: "/bookings/requests", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
+        { title: "Today's work", icon: LayoutDashboard, href: "/bookings", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
         { title: "Conflicts", icon: GitCompareArrows, href: "/bookings/conflicts", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
-        { title: "Calendar", icon: CalendarDays, href: "/bookings/calendar", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
+      ],
+    },
+    {
+      id: "browse",
+      title: "Browse",
+      items: [
+        { title: "All requests", icon: ClipboardList, href: "/bookings/requests", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
         { title: "Organisations", icon: Building2, href: "/bookings/organisations", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
+        { title: "Rooms", icon: DoorOpen, href: "/bookings/rooms", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
+        { title: "Calendar", icon: CalendarDays, href: "/bookings/calendar", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
+      ],
+    },
+    {
+      id: "records",
+      title: "Records",
+      items: [
         { title: "Outbox", icon: Mail, href: "/bookings/outbox", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
         { title: "Settings", icon: Settings, href: "/bookings/settings", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
       ],

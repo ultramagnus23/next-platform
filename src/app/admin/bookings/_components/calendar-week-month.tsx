@@ -63,11 +63,11 @@ export function CalendarWeek({ date, room, items }: { date: string; room: Room |
                 )
                 return item.canOpen ? (
                   <Link key={item.id} href={`/admin/bookings/requests/${item.id}`} title={label} aria-label={label} className={className} style={{ top, height: h }}>
-                    {item.eventName}
+                    <b className="mr-1 font-mono">{item.organisationCode}</b>{item.eventName}
                   </Link>
                 ) : (
                   <div key={item.id} title={label} aria-label={label} className={className} style={{ top, height: h }}>
-                    {item.eventName}
+                    <b className="mr-1 font-mono">{item.organisationCode}</b>{item.eventName}
                   </div>
                 )
               })}

@@ -120,11 +120,11 @@ export function CalendarDayGrid({ date, rooms, items, demo }: CalendarDayGridPro
                           className={className}
                           style={style}
                         >
-                          <span className="truncate">{item.eventName}</span>
+                          <span className="truncate"><b className="mr-1 font-mono">{item.organisationCode}</b>{item.eventName}</span>
                         </Link>
                       ) : (
                         <div key={item.id} title={label} aria-label={label} className={className} style={style}>
-                          <span className="truncate">{item.eventName}</span>
+                          <span className="truncate"><b className="mr-1 font-mono">{item.organisationCode}</b>{item.eventName}</span>
                         </div>
                       )
                     })}
