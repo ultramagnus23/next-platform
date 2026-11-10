@@ -62,3 +62,24 @@ npx tsx src/app/admin/bookings/_server/engine/scenarios.ts
 - `npm run build` needs Google Fonts. Without network access, set `NEXT_FONT_GOOGLE_MOCKED_RESPONSES` to a mock module.
 - `switch`, `radio-group`, `alert-dialog` and `hover-card` were never added to `src/components/ui/`. The free-only toggle is a small
   accessible switch built in place, and room choices are buttons with `aria-pressed`.
+
+## Real sign-in check
+
+`_server/real-signin-check.cjs` runs 26 checks of the real access path with no demo flags and no bypass. It mints genuine NextAuth
+session cookies, so the middleware, role claims, the office lookup and the "Acting for" switch all run as after a Google sign-in.
+
+```bash
+NEXTAUTH_SECRET=real-test-secret AUTH_CLIENT_ID=x AUTH_CLIENT_SECRET=y \
+BOOKING_OFFICES="slo:slo.tester@ashoka.edu.in;acad:acad.tester@ashoka.edu.in;oa:two.tester@ashoka.edu.in;cfe:two.tester@ashoka.edu.in" \
+SUPERADMIN_EMAILS=super.tester@ashoka.edu.in npx next dev -p 3200
+node src/app/admin/bookings/_server/real-signin-check.cjs   # in a second terminal
+```
+
+It covers: signed-out redirects, a signed-in non-member, a forged role claim, scoped inboxes per office, refusing other offices, the
+Acting for switch for a two-office person, super-admin-only rules, demo routes returning 404, and the persona cookie being ignored.
+What it cannot cover is the Google consent screen and the Strapi user record: those need a real `@ashoka.edu.in` account.
+
+To do that last step yourself: set `AUTH_CLIENT_ID`, `AUTH_CLIENT_SECRET`, `NEXTAUTH_SECRET`, `STRAPI_URL`, `STRAPI_API_TOKEN`,
+`SUPERADMIN_EMAILS` and `BOOKING_OFFICES` in `.env`, leave `BOOKING_DEMO_MODE` and `BYPASS_AUTH` unset, run `npm run dev`, and sign in
+with an account listed in `BOOKING_OFFICES`. A role change reaches a signed-in person within 10 minutes, or immediately on a new sign-in.
+If Strapi is down, an existing session keeps its old role and retries after a minute.
