@@ -1,97 +1,24 @@
-<p align="left">
-  <img src="documentation/media/logo.png" width="200" height="200" />
-</p>
+# Room Bookings Admin
 
-# Ashoka University Student Platform
+Admin portal for campus room and event bookings. Authorities (SLO, OA, CFE, Academic Booking) review
+requests, resolve conflicts and see room availability. Every decision queues an email.
 
-A Student Engagement Platform developed by the Ministry of Technology.
+This repository holds only that portal, its sign-in and its shell. The feature spec is in
+`src/app/admin/bookings/PRD.md` and the current state is in `src/app/admin/bookings/README.md`.
 
+## Run
 
+```bash
+npm install
+npm run dev
+```
 
+Set `BOOKING_DEMO_MODE=true` for the persona switcher and simulated data. See `.env.example` for the
+booking keys. Sign-in uses Google through NextAuth and the Strapi user store (`src/auth.ts`).
 
-## Features
+## Checks
 
-- SG Compose - Email composer to draft and send approved emails to the Ashokan student community from the Student Government email 
-
-- Games and Puzzles (Coming Soon)
-
-- Course Reviews - Open platform for students to share experiences with various courses undertaken during their semester
-
-- Semester Planner - Plan and organize your course schedule
-
-- CGPA Planner - Simulates future CGPA scenarios based on expected grades
-
-- Events Calendar - List of upcoming events on campus [Overhaul in progress]
-
-- Trajectory Planner - Plans your academic journey semester by semester 
-
-- Organisations Catalogue - Catalogue of all clubs, societies and ministries at Ashoka University
-
-- WiFi Tickets - Notify the Ministry and IT about WiFi outages and connectivity issues
-
-- Pool a Cab
-
-- Pool a Subscription
-
-- Borrow Assets - Provides Ashokans an opportunity to borrow tech products on an urgent basis from the Ministry of Technology [Updated dynamically with inventory levels]
-
-- Profile Section - View, Update and Deactivate / Delete your account
-
-## Screenshots
-
-<div style="text-align: center;">
-  <img
-    src="documentation/screenshots/dashboard.png"
-    width="800"
-    alt="Dashboard view"
-    style="display:block; margin: 0 auto;"
-  />
-</div>
-<p align="center">Dashboard</p>
-
-<img
-  src="documentation/media/insights.gif"
-  width="800"
-  alt="Platform Insights"
-  style="display:block; margin: 12px auto;"
-/>
-<p align="center">Platform Insights (As of 13th Jan, 2026)</p>
-
-<img
-  src="documentation/screenshots/profile.png"
-  width="800"
-  alt="Profile Section"
-  style="display:block; margin: 12px auto;"
-/>
-<p align="center">Profile Section</p>
-
-
-## Tech Stack
-
-**Core:** Next.js, React, TypeScript
-
-**Styling:** TailwindCSS, ShadCN, Framer Motion
-
-**Backend/Services:** NextAuth, Google APIs, Axios, Nodemailer
-
-**Utilities:** date-fns, Sonner, Vaul, cmdk
-
-## More Information
-
-For information on deploying to server, [click here](documentation/INSTRUCTIONS.md)
-
-For detailed information on the platform's features, [click here](documentation/OVERVIEW.md)
-
-
-## Feedback & Support
-
-If you have any feedback or need support, please reach out to us at technology.ministry@ashoka.edu.in
-
-
-## Contributors
-
-<a href="https://github.com/Ministry-of-Technology-AU/next-platform/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=Ministry-of-Technology-AU/next-platform" />
-</a>
-
-Made with [contrib.rocks](https://contrib.rocks).
+```bash
+npm run typecheck
+npx tsx src/app/admin/bookings/_server/engine/scenarios.ts
+```

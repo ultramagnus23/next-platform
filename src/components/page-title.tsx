@@ -1,5 +1,4 @@
 import React from "react";
-import { WritingText } from "./ui/shadcn-io/writing-text";
 import { ExpandableText } from "./expandable-text";
 import { cn } from "@/lib/utils";
 
@@ -42,20 +41,7 @@ function PageTitle({
         <div className="flex flex-col min-w-0 flex-1">
           <div className="flex items-center gap-2 flex-wrap">
             <HeadingTag className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight text-foreground break-words">
-              {animate ? (
-                <WritingText
-                  text={text}
-                  spacing={6}
-                  transition={{
-                    type: "spring",
-                    bounce: 0,
-                    duration: 0.8,
-                    delay: 0.15,
-                  }}
-                />
-              ) : (
-                text
-              )}
+              {text}
             </HeadingTag>
             {badge && <div className="flex-shrink-0">{badge}</div>}
           </div>

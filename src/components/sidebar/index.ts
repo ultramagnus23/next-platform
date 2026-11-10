@@ -1,7 +1,5 @@
 export { AppSidebar } from "./app-sidebar";
 
-export { platformSidebar } from "./platform";
-export { organisationSidebar } from "./organisation";
 export { adminSidebar } from "./admin";
 
 export {

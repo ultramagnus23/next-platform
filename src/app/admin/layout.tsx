@@ -5,7 +5,6 @@ import Navbar from "@/components/navbar/navbar";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { TourProvider } from "@/components/guided-tour";
 import { Suspense } from "react";
 import { auth } from "@/auth";
 import { redirect } from "next/navigation";
@@ -33,27 +32,19 @@ export default async function AdminLayout({
   children: React.ReactNode;
 }>) {
   const session = await auth();
-  const adminEmails = process.env.ADMIN_EMAILS?.split(",").map(e => e.trim()) || [];
-  
-  const isAuthorized =
-    (session?.user?.email && adminEmails.includes(session.user.email)) ||
-    session?.user?.role === 'ashoka_admin' ||
-    session?.user?.access?.includes('ashoka_admin') ||
-    session?.user?.access?.includes('booking_admin');
+  const isAuthorized = session?.user?.access?.includes('booking_admin') ?? false;
   const bypassAuth = process.env.BYPASS_AUTH === 'true';
 
   if (!isAuthorized && !bypassAuth) {
     redirect("/unauthorized"); // or "/login"
   }
 
-  // Resolved once here — see the note in src/app/platform/layout.tsx.
   const role = session?.user?.role;
   const access = session?.user?.access ?? [];
 
   return (
     <div className={`${nunito.variable} ${nunitoSans.variable} antialiased`}>
       <TooltipProvider>
-        <TourProvider autoStart={false}>
           <SidebarProvider defaultOpen={false}>
             <div className="flex min-h-screen w-full overflow-x-hidden">
               <AppSidebar interfaceId="admin" role={role} access={access} />
@@ -67,7 +58,6 @@ export default async function AdminLayout({
               </div>
             </div>
           </SidebarProvider>
-        </TourProvider>
       </TooltipProvider>
     </div>
   );

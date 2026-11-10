@@ -3,43 +3,13 @@ import { auth } from './auth'
 import { limitApiRequest } from '@/lib/rate-limit'
 import { platform } from '@/lib/platform-logger'
 
-// Define protected routes and their access requirements
-// ashoka_admin has 'platform' access so they can reach /platform,
-// but the sidebar and dashboard are filtered for them at the layout/page level.
-const ROUTE_ACCESS = {
-  '/platform': ['platform'],
-  '/platform/rep-dashboard': ['rep_dashboard'],
-  '/sg-compose': ['platform'],
-  '/organisations': ['organization'],
-  // The admin layout also admits booking_admin, so the older admin pages are
-  // pinned to ashoka_admin here.
+// Routes that need a specific access grant. First match wins.
+const ROUTE_ACCESS: Record<string, string[]> = {
   '/admin/bookings': ['booking_admin'],
-  '/admin/organisations': ['ashoka_admin'],
-  '/admin/organizations': ['ashoka_admin'],
+  '/api/admin/bookings': ['booking_admin'],
 }
 
-// Induction surfaces an organisation can share with individuals who are not
-// organisation accounts (see lib/inductions/access.ts). The middleware only
-// checks that they are signed in — the page itself resolves the role's access
-// list and 404s anyone who is not on it.
-const INDUCTION_SHARED_ROUTES = [
-  // The landing page, which lists just the roles shared with the viewer.
-  /^\/organisations\/inductions\/?$/,
-  // A single role workspace: /organisations/inductions/<cycleId>/<roleId>
-  /^\/organisations\/inductions\/(?!forms(?:\/|$))[^/]+\/[^/]+\/?$/,
-]
-
-// Tools that ashoka_admin users are NOT allowed to access directly by URL.
-// Keep in sync with the `hideFor: ['ashoka_admin']` entries in
-// src/components/sidebar/platform.ts.
-const ASHOKA_ADMIN_BLOCKED_ROUTES = [
-  '/platform/course-reviews',
-  '/platform/sg-compose',
-  '/sg-compose',
-  '/platform/wifi-tickets',
-  '/platform/borrow-assets',
-  '/platform/ashokan-around',
-]
+const PUBLIC_PATHS = ['/', '/login', '/unauthorized']
 
 export default auth(async function middleware(req) {
   const { pathname } = req.nextUrl
@@ -52,38 +22,7 @@ export default auth(async function middleware(req) {
   const limited = limitApiRequest(pathname, req.method, req.headers, req.auth?.user?.email)
   if (limited) return limited
 
-  if (pathname.startsWith('/backend')) {
-    return NextResponse.next()
-  }
-
-  // Allow ABA and APL webhooks (called by Strapi) and SSE streams (public real-time endpoint)
-  if (pathname.startsWith('/api/platform/sports/aba/webhook') ||
-    pathname.startsWith('/api/platform/sports/aba/sse') ||
-    pathname.startsWith('/api/platform/sports/apl/webhook') ||
-    pathname.startsWith('/api/platform/sports/apl/sse')) {
-    return NextResponse.next()
-  }
-
-  // CGPA planner API is called from outside the platform (CORS, Google bearer token).
-  // Every handler gates itself: /parse is public and stateless, the rest need a session or a
-  // verified bearer token. The rate limit above still applies.
-  if (pathname.startsWith('/api/platform/cgpa-planner')) {
-    return NextResponse.next()
-  }
-
-  if (pathname.endsWith('jpg') || pathname.endsWith('png') || pathname.endsWith('svg') || pathname.endsWith('ico')) {
-    return NextResponse.next()
-  }
-
-  // Allow root path and login page - let them through
-  if (pathname === '/' || pathname === '/login' || pathname === '/unauthorized') {
-    return NextResponse.next()
-  }
-
-  // Allow static files and Next.js internals
-  if (pathname.startsWith('/_next/') ||
-    pathname.startsWith('/favicon.ico') ||
-    pathname.startsWith('/public/')) {
+  if (PUBLIC_PATHS.includes(pathname) || pathname.startsWith('/_next/') || pathname.startsWith('/favicon.ico')) {
     return NextResponse.next()
   }
 
@@ -98,85 +37,17 @@ export default auth(async function middleware(req) {
     return NextResponse.next()
   }
 
-  // Check if user is authenticated
   if (!req.auth?.user) {
-    platform.log('❌ User not authenticated, redirecting to signin from:', pathname)
-
-    // Create a login page URL with return URL as parameter
+    platform.log('User not authenticated, redirecting to sign in from:', pathname)
     const loginUrl = new URL('/login', req.url)
     loginUrl.searchParams.set('callbackUrl', pathname)
     return NextResponse.redirect(loginUrl)
   }
 
-  // Note: User creation in Strapi is now handled in the signIn callback (src/auth.ts)
-  // This runs once at login instead of on every request, improving performance
-
-  // Special access control for HOR dashboard
-  if (pathname === '/platform/sg-compose/dashboard') {
-    const horMembers = (process.env.HOR_MEMBERS || '').split(',').map(email => email.trim())
-
-    if (!horMembers.includes(req.auth.user.email)) {
-      platform.log(`❌ User ${req.auth.user.email} denied access to HOR dashboard`)
-      return NextResponse.redirect(new URL('/unauthorized', req.url))
-    }
-
-    platform.log(`✅ User ${req.auth.user.email} granted access to HOR dashboard`)
-    return NextResponse.next()
-  }
-
-  // Special access control for APL Admin
-  if (pathname === '/platform/sports/apl/admin') {
-    const userAccess = req.auth.user?.access || []
-
-    if (!userAccess.includes('apl_admin')) {
-      platform.log(`❌ User ${req.auth.user.email} denied access to APL Admin`)
-      return NextResponse.redirect(new URL('/unauthorized', req.url))
-    }
-
-    platform.log(`✅ User ${req.auth.user.email} granted access to APL Admin`)
-    return NextResponse.next()
-  }
-
-  // Special access control for Rep Dashboard
-  if (pathname === '/platform/rep-dashboard') {
-    const userAccess = req.auth.user?.access || []
-
-    if (!userAccess.includes('rep_dashboard')) {
-      platform.log(`❌ User ${req.auth.user.email} denied access to Rep Dashboard`)
-      return NextResponse.redirect(new URL('/unauthorized', req.url))
-    }
-
-    platform.log(`✅ User ${req.auth.user.email} granted access to Rep Dashboard`)
-    return NextResponse.next()
-  }
-
-  // ashoka_admin: block access to routes outside their allowed tool set
-  if (req.auth.user?.role === 'ashoka_admin') {
-    const isBlocked = ASHOKA_ADMIN_BLOCKED_ROUTES.some(route => pathname.startsWith(route))
-    if (isBlocked) {
-      platform.log(`🔒 ashoka_admin ${req.auth.user.email} denied access to ${pathname}`)
-      return NextResponse.redirect(new URL('/unauthorized', req.url))
-    }
-    // Allow access to everything else in /platform (dashboard, profile, allowed tools)
-    return NextResponse.next()
-  }
-
-  // Shared induction roles: signed in is enough to reach the page, which then
-  // enforces the organisation's own access list.
-  if (INDUCTION_SHARED_ROUTES.some(pattern => pattern.test(pathname))) {
-    return NextResponse.next()
-  }
-
-  // Check route access permissions
-  const userAccess = req.auth.user?.access || []
-  // Check if user has access to the requested route
+  const userAccess = req.auth.user.access || []
   for (const [routePath, requiredAccess] of Object.entries(ROUTE_ACCESS)) {
     if (pathname.startsWith(routePath)) {
-      const hasAccess = requiredAccess.some(access => userAccess.includes(access))
-      const authorizedEmails = (process.env.AUTHORIZED_EMAILS || '').split(',')
-
-      if (!hasAccess && !authorizedEmails.includes(req.auth.user.email)) {
-        // Authenticated but unauthorized for this route -> show unauthorized page
+      if (!requiredAccess.some((grant) => userAccess.includes(grant))) {
         return NextResponse.redirect(new URL('/unauthorized', req.url))
       }
       break
@@ -186,20 +57,12 @@ export default auth(async function middleware(req) {
   return NextResponse.next()
 })
 
-// Configure middleware to run on specific paths
 export const config = {
   // Node, not edge: the auth callback refreshes claims from Strapi (axios) as
   // they go stale, and that runs here on the first request after expiry.
   runtime: 'nodejs',
   matcher: [
-    '/sg-compose/:path*',
-    '/platform/:path*',
-    '/organisations/:path*',
-    '/api/sg-compose/:path*',
-    '/api/drive/:path*',
-    '/api/mail/:path*',
-    // Skips /public assets by extension so auth() never runs for an image or font,
-    // and /api/revalidate, which Strapi calls with its own bearer token.
-    '/((?!api/auth|api/revalidate|_next/static|_next/image|favicon.ico|login|$|.*\\.(?:png|jpg|jpeg|gif|webp|avif|svg|ico|woff2?|webmanifest)$).*)'
+    // Skips static assets by extension so auth() never runs for an image or font.
+    '/((?!api/auth|_next/static|_next/image|favicon.ico|login|$|.*\\.(?:png|jpg|jpeg|gif|webp|avif|svg|ico|woff2?|webmanifest)$).*)',
   ],
 }

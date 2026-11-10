@@ -4,8 +4,6 @@ import type {
   SidebarInterface,
   SidebarCategory,
 } from "./types";
-import { platformSidebar } from "./platform";
-import { organisationSidebar } from "./organisation";
 import { adminSidebar } from "./admin";
 
 /**
@@ -13,8 +11,6 @@ import { adminSidebar } from "./admin";
  * file and one line here — nothing else.
  */
 export const sidebarInterfaces = {
-  platform: platformSidebar,
-  organisations: organisationSidebar,
   admin: adminSidebar,
 } as const;
 

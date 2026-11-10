@@ -41,7 +41,7 @@ interface AppSidebarProps {
 }
 
 export function AppSidebar({
-  interfaceId = "platform",
+  interfaceId = "admin",
   role,
   access,
   title: titleOverride,
