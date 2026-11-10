@@ -1,11 +1,13 @@
+import type { ApprovalLog, BatchSnapshot, BookingRequest, OutboxEmail } from '../../types'
 import type { BookingRepository, BookingSeedData } from './repository'
 
 /**
- * In-memory repository for the demo. This is the only file that holds booking
- * state. Nothing else imports it: go through `./index.ts`.
+ * In-memory repository for the demo. The only file that holds booking state.
+ * Nothing else imports it: go through `./index.ts`.
  *
- * Every read and write copies, so engine code can never change stored state by
- * accident. Works on a single Node process only.
+ * Requests, logs and settings are copied on every read and write so engine
+ * code cannot change stored state by accident. Rooms, organisations and the
+ * timetable are read-only, so they are shared. Works on one Node process only.
  */
 
 function copy<T>(value: T): T {
@@ -14,9 +16,16 @@ function copy<T>(value: T): T {
 
 export class MemoryBookingRepository implements BookingRepository {
   private data: BookingSeedData
+  private requestsById = new Map<string, BookingRequest>()
+  private batches = new Map<string, BatchSnapshot>()
 
   constructor(private readonly seedFactory: () => BookingSeedData) {
-    this.data = copy(seedFactory())
+    this.data = seedFactory()
+    this.indexRequests()
+  }
+
+  private indexRequests(): void {
+    this.requestsById = new Map(this.data.requests.map((r) => [r.id, r]))
   }
 
   async listRequests() {
@@ -24,11 +33,11 @@ export class MemoryBookingRepository implements BookingRepository {
   }
 
   async getRequest(id: string) {
-    const found = this.data.requests.find((r) => r.id === id)
+    const found = this.requestsById.get(id)
     return found ? copy(found) : null
   }
 
-  async saveRequests(requests: Parameters<BookingRepository['saveRequests']>[0]) {
+  async saveRequests(requests: BookingRequest[]) {
     const next = [...this.data.requests]
     for (const request of requests) {
       const index = next.findIndex((r) => r.id === request.id)
@@ -36,9 +45,10 @@ export class MemoryBookingRepository implements BookingRepository {
       else next[index] = copy(request)
     }
     this.data.requests = next
+    this.indexRequests()
   }
 
-  async appendLogs(logs: Parameters<BookingRepository['appendLogs']>[0]) {
+  async appendLogs(logs: ApprovalLog[]) {
     this.data.logs = [...this.data.logs, ...copy(logs)]
   }
 
@@ -47,12 +57,25 @@ export class MemoryBookingRepository implements BookingRepository {
     return copy(logs).sort((a, b) => a.at.localeCompare(b.at))
   }
 
-  async appendOutbox(emails: Parameters<BookingRepository['appendOutbox']>[0]) {
+  async appendOutbox(emails: OutboxEmail[]) {
     this.data.outbox = [...this.data.outbox, ...copy(emails)]
   }
 
   async listOutbox() {
     return copy(this.data.outbox).sort((a, b) => b.at.localeCompare(a.at))
+  }
+
+  async voidOutboxByBatch(batchId: string, reason: string) {
+    this.data.outbox = this.data.outbox.map((e) => (e.batchId === batchId ? { ...e, status: 'failed' as const, failReason: reason } : e))
+  }
+
+  async saveBatch(batch: BatchSnapshot) {
+    this.batches.set(batch.id, copy(batch))
+  }
+
+  async getBatch(id: string) {
+    const found = this.batches.get(id)
+    return found ? copy(found) : null
   }
 
   async getSettings() {
@@ -64,14 +87,20 @@ export class MemoryBookingRepository implements BookingRepository {
   }
 
   async listRooms() {
-    return copy(this.data.rooms)
+    return this.data.rooms
   }
 
   async listOrganisations() {
-    return copy(this.data.organisations)
+    return this.data.organisations
+  }
+
+  async listTimetable() {
+    return this.data.timetable
   }
 
   async reset() {
-    this.data = copy(this.seedFactory())
+    this.data = this.seedFactory()
+    this.batches = new Map()
+    this.indexRequests()
   }
 }

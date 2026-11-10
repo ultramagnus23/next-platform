@@ -1,33 +1,25 @@
-# Booking admin portal
+# Room booking admin portal
 
-Admin side of the room booking system, at `/admin/bookings`. The spec is `PRD.md`.
+Admin side of the campus room booking system, at `/admin/bookings`. The spec is `PRD.md` (v2).
 
-## Current state
+## What it does
 
-Built and working in demo mode: Today's work (queue grouped by organisation), global search, Requests,
-Request detail with every action, Conflicts with the resolve flow, Rooms board, Calendar (day, week,
-month), Organisation directory and profiles, Outbox and Settings. Organisations carry a short code and
-colour (see PRD section 14). All data is
-in memory. No email is sent and there is no AMS link.
+Every request is sorted on arrival into a lane: Clash, Needs a look or Clear. Approvers work the Inbox, approve Clear requests together,
+offer a free room instead of saying no, and resolve a clash in one decision. Every action is logged, emails are queued in an outbox and
+single decisions can be undone for 10 seconds.
 
-Not built: the organisation-facing portal, Strapi collections, real mail sending, recurring
-bookings, a campus map (see PRD section 12).
+Screens: Inbox, Clashes, Rooms (day grid with find bar), Organisations, Sent emails, Rules. A request opened from the grid has its own page.
+
+Not built: Rooms week and month views, the Calendar agenda, the organisation-facing portal, real email, real AMS, Strapi.
 
 ## Run the demo
 
-1. In `.env`, set `BOOKING_DEMO_MODE=true`. Sign in with an account that holds the `booking_admin`
-   grant (a super admin does).
-2. `npm run dev`, then open `/admin/bookings`.
-3. Use "Viewing as" to switch persona, "Simulate request" to act as an organisation, and the
-   overflow menu to reset the data.
+1. Set `BOOKING_DEMO_MODE=true` in `.env`. Sign in with an account that holds the `booking_admin` grant (a super admin does).
+   For a local run with no sign-in, also set `BYPASS_AUTH=true`. That works only outside production.
+2. `npm run dev`, open `/admin/bookings`.
+3. "Viewing as" switches persona. The overflow menu simulates a club request, advances the clock one day and resets the data.
 
-Local shortcut with no sign-in: set both `BOOKING_DEMO_MODE=true` and `BYPASS_AUTH=true`. This works
-only outside production builds (see `src/middleware.ts` and `isDevBypass()` in `_server/authorities.ts`).
-
-The demo script is in `PRD.md` section 11. Seed dates are relative to the day the server starts, so
-the demo pair sits four days ahead.
-
-Scenario checks (engines and service, no framework):
+Scenario checks:
 
 ```bash
 npx tsx src/app/admin/bookings/_server/engine/scenarios.ts
@@ -37,46 +29,36 @@ npx tsx src/app/admin/bookings/_server/engine/scenarios.ts
 
 | Key | Purpose |
 |-----|---------|
-| `BOOKING_AUTHORITIES` | Who acts for each authority. `slo:a@x.in,b@x.in;oa:...;cfe:...;acad:...`. Malformed input is treated as empty. |
-| `BOOKING_DEMO_MODE` | `true` enables the persona switcher, reset and simulated submission. |
+| `BOOKING_OFFICES` | Who acts for each office: `slo:a@x.in,b@x.in;oa:...;cfe:...;acad:...`. Malformed input is treated as empty. |
+| `BOOKING_DEMO_MODE` | `true` enables personas, simulated requests, the clock and reset. |
 
 ## What is mocked
 
-- **Data:** `_server/repo/memory.ts` holds everything on `globalThis`. It resets on restart and works on one Node
-  process only.
-- **Email:** the Outbox page shows what would be sent.
-- **AMS:** a "synced (simulated)" badge with a timestamp.
-- **Names, rooms, emails:** placeholders in `_server/repo/fixtures.ts`.
+- Data lives in memory (`_server/repo/memory.ts`) and resets on restart. One Node process only.
+- Emails are shown, never sent. AMS shows a "synced (simulated)" badge.
+- Organisations, the timetable, request history and no-show records are invented. Venues are the real campus inventory, with placeholder
+  opening hours and equipment.
 
 ## Layout
 
 | Path | Holds |
 |------|-------|
-| `_server/engine/` | Pure functions: overlap, conflicts, priority, workflow, availability, auto-approval, notifications |
-| `_server/service.ts` | The only repository caller. Room-date locking, version checks, all-or-nothing resolve |
-| `_server/repo/` | `repository.ts` interface, `memory.ts`, `seed.ts`, `fixtures.ts`, `index.ts` |
-| `_server/actor.ts`, `access.ts`, `authorities.ts` | Who is acting and what they may see and do |
+| `_server/engine/` | Pure functions: occupancy and clashes, flags and lanes, priority, workflow and sweep, availability, auto-approval, notifications |
+| `_server/service.ts` | The only repository caller: locks, versions, bulk approve, undo, resolve |
+| `_server/repo/` | Interface, in-memory store, venue and organisation fixtures, seed |
+| `_server/actor.ts`, `access.ts`, `offices.ts` | Who is acting and what they may do |
 | `_components/` | Page components |
 | `src/app/api/admin/bookings/` | Routes |
 
-## Swapping the repository for Strapi
+## Swapping in Strapi
 
-1. Create the collection types listed in `PRD.md` section 5.
-2. Write a class that implements `BookingRepository` (`_server/repo/repository.ts`) against Strapi.
-3. Return it from `getBookingRepository()` in `_server/repo/index.ts`.
-4. Move the room-date lock and the version check into a custom Strapi controller that uses a database
-   transaction. Strapi's REST API cannot do this, and `KeyedMutex` only works inside one process.
-5. Drain the outbox through `sendMail()` in `src/lib/apis/mail.ts` instead of rendering it.
-
-Pages, routes and engines need no change.
+1. Create the collection types in `PRD.md` section 5.
+2. Implement `BookingRepository` (`_server/repo/repository.ts`) against Strapi and return it from `getBookingRepository()`.
+3. Move the room-date lock, version check and undo snapshot into a custom Strapi controller with a database transaction.
+4. Drain the outbox through `sendMail()` in `src/lib/apis/mail.ts`.
 
 ## Known gaps
 
-- `npm run build` needs Google Fonts. Where the fonts cannot be fetched, build with
-  `NEXT_FONT_GOOGLE_MOCKED_RESPONSES` pointing at a mock module.
-- The Requests table uses `ui/table` with a card layout on mobile instead of the shared `DataTable`,
-  which has no card layout.
-- The "Rejected in last 30 days" tile counts by decision date, but its link lists all rejected requests.
-- `switch`, `radio-group`, `alert-dialog` and `hover-card` were not installed, so the auto-approval toggle
-  is a checkbox.
-- Strapi collection types, real email and AMS are milestone M7, after the demo.
+- `npm run build` needs Google Fonts. Without network access, set `NEXT_FONT_GOOGLE_MOCKED_RESPONSES` to a mock module.
+- `switch`, `radio-group`, `alert-dialog` and `hover-card` were never added to `src/components/ui/`. The free-only toggle is a small
+  accessible switch built in place, and room choices are buttons with `aria-pressed`.

@@ -3,82 +3,90 @@
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp } from 'lucide-react'
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import type { OrganisationStats } from '../types'
 import { Input } from '@/components/ui/input'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import type { OrgRow } from '../types'
 import { formatTimestamp } from '../utils'
-import { OrgChip } from './badges'
 
-export interface OrganisationRow extends OrganisationStats {
-  authorityLabel: string
-  mostUsedRoomLabel: string
-}
-
-type SortKey = 'name' | 'authority' | 'requests' | 'confirmed' | 'rejected' | 'cancellations' | 'displaced' | 'autoApproved' | 'last'
+type SortKey = 'name' | 'kind' | 'office' | 'week' | 'bookings' | 'confirmed' | 'rejected' | 'lateCancels' | 'noShows' | 'displaced' | 'autoApproved' | 'last'
 
 const COLUMNS: Array<{ key: SortKey; label: string; numeric?: boolean }> = [
   { key: 'name', label: 'Organisation' },
-  { key: 'authority', label: 'Governing authority' },
-  { key: 'requests', label: 'Requests', numeric: true },
+  { key: 'kind', label: 'Type' },
+  { key: 'office', label: 'Office' },
+  { key: 'week', label: 'This week', numeric: true },
+  { key: 'bookings', label: 'This semester', numeric: true },
   { key: 'confirmed', label: 'Confirmed', numeric: true },
-  { key: 'rejected', label: 'Rejected', numeric: true },
-  { key: 'cancellations', label: 'Cancelled', numeric: true },
-  { key: 'displaced', label: 'Displaced', numeric: true },
-  { key: 'autoApproved', label: 'Auto-approved', numeric: true },
+  { key: 'rejected', label: 'Declined', numeric: true },
+  { key: 'lateCancels', label: 'Late cancels', numeric: true },
+  { key: 'noShows', label: 'No-shows', numeric: true },
+  { key: 'displaced', label: 'Replaced', numeric: true },
+  { key: 'autoApproved', label: 'Auto', numeric: true },
   { key: 'last', label: 'Last request' },
 ]
 
-function valueOf(row: OrganisationRow, key: SortKey): string | number {
+export interface OrgTableRow extends OrgRow {
+  officeLabel: string
+}
+
+function valueOf(r: OrgTableRow, key: SortKey): string | number {
   switch (key) {
     case 'name':
-      return row.organisation.name
-    case 'authority':
-      return row.authorityLabel
+      return r.organisation.name
+    case 'kind':
+      return r.organisation.kind
+    case 'office':
+      return r.officeLabel
+    case 'week':
+      return r.standing.weekBookings
+    case 'bookings':
+      return r.standing.semester.bookings
+    case 'confirmed':
+      return r.standing.confirmed
+    case 'rejected':
+      return r.standing.rejected
+    case 'lateCancels':
+      return r.standing.semester.lateCancels
+    case 'noShows':
+      return r.standing.semester.noShows
+    case 'displaced':
+      return r.standing.displaced
+    case 'autoApproved':
+      return r.standing.autoApproved
     case 'last':
-      return row.lastRequestAt ?? ''
-    default:
-      return row[key]
+      return r.standing.lastRequestAt ?? ''
   }
 }
 
-export function OrganisationsTable({ rows }: { rows: OrganisationRow[] }) {
-  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'requests', dir: 'desc' })
+export function OrganisationsTable({ rows }: { rows: OrgTableRow[] }) {
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'noShows', dir: 'desc' })
   const [filter, setFilter] = useState('')
 
   const sorted = useMemo(() => {
     const q = filter.trim().toLowerCase()
-    const list = rows.filter((r) => !q || r.organisation.code.toLowerCase().startsWith(q) || r.organisation.name.toLowerCase().includes(q))
+    const list = rows.filter((r) => !q || r.organisation.name.toLowerCase().includes(q))
     list.sort((a, b) => {
       const av = valueOf(a, sort.key)
       const bv = valueOf(b, sort.key)
       const cmp = typeof av === 'number' && typeof bv === 'number' ? av - bv : String(av).localeCompare(String(bv))
-      return sort.dir === 'asc' ? cmp : -cmp
+      return (sort.dir === 'asc' ? cmp : -cmp) || a.organisation.name.localeCompare(b.organisation.name)
     })
     return list
   }, [rows, sort, filter])
 
-  function toggle(key: SortKey) {
-    setSort((prev) => (prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }))
-  }
+  const toggle = (key: SortKey) =>
+    setSort((p) => (p.key === key ? { key, dir: p.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'name' || key === 'kind' || key === 'office' ? 'asc' : 'desc' }))
 
   return (
-    <>
-      <Input
-        type="search"
-        autoComplete="off"
-        placeholder="Filter by code or name…"
-        aria-label="Filter organisations"
-        className="max-w-sm"
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-      />
-      <div className="hidden overflow-x-auto rounded-lg border border-border md:block">
+    <div className="grid gap-3">
+      <Input type="search" autoComplete="off" placeholder="Filter by name…" aria-label="Filter organisations" className="max-w-sm" value={filter} onChange={(e) => setFilter(e.target.value)} />
+      <div className="overflow-x-auto rounded-lg border border-border">
         <Table>
           <TableHeader>
             <TableRow>
               {COLUMNS.map((c) => (
                 <TableHead key={c.key} className={c.numeric ? 'text-right' : undefined} aria-sort={sort.key === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                  <button type="button" className="inline-flex items-center gap-1 font-medium" onClick={() => toggle(c.key)}>
+                  <button type="button" className="inline-flex items-center gap-1 whitespace-nowrap font-medium" onClick={() => toggle(c.key)}>
                     {c.label}
                     {sort.key === c.key && (sort.dir === 'asc' ? <ArrowUp className="h-3 w-3" aria-hidden="true" /> : <ArrowDown className="h-3 w-3" aria-hidden="true" />)}
                   </button>
@@ -88,46 +96,34 @@ export function OrganisationsTable({ rows }: { rows: OrganisationRow[] }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {sorted.map((row) => (
-              <TableRow key={row.organisation.id}>
+            {sorted.map((r) => (
+              <TableRow key={r.organisation.id}>
                 <TableCell className="font-medium">
-                  <Link href={`/admin/bookings/organisations/${row.organisation.code.toLowerCase()}`} className="hover:underline">
-                    <OrgChip code={row.organisation.code} colour={row.organisation.colour} name={row.organisation.name} />
+                  <Link href={`/admin/bookings?q=${encodeURIComponent(r.organisation.name)}`} className="hover:underline">
+                    {r.organisation.name}
                   </Link>
                 </TableCell>
-                <TableCell>{row.authorityLabel}</TableCell>
-                <TableCell className="text-right tabular-nums">{row.requests}</TableCell>
-                <TableCell className="text-right tabular-nums">{row.confirmed}</TableCell>
-                <TableCell className="text-right tabular-nums">{row.rejected}</TableCell>
-                <TableCell className="text-right tabular-nums">{row.cancellations}</TableCell>
-                <TableCell className="text-right tabular-nums">{row.displaced}</TableCell>
-                <TableCell className="text-right tabular-nums">{row.autoApproved}</TableCell>
-                <TableCell className="whitespace-nowrap text-xs">{row.lastRequestAt ? formatTimestamp(row.lastRequestAt) : 'None'}</TableCell>
-                <TableCell className="whitespace-nowrap">{row.mostUsedRoomLabel}</TableCell>
+                <TableCell className="capitalize">{r.organisation.kind}</TableCell>
+                <TableCell>{r.officeLabel}</TableCell>
+                <TableCell className="text-right tabular-nums">
+                  {r.standing.weekBookings}
+                  {r.standing.weeklyCap ? ` / ${r.standing.weeklyCap}` : ''}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">{r.standing.semester.bookings}</TableCell>
+                <TableCell className="text-right tabular-nums">{r.standing.confirmed}</TableCell>
+                <TableCell className="text-right tabular-nums">{r.standing.rejected}</TableCell>
+                <TableCell className="text-right tabular-nums">{r.standing.semester.lateCancels}</TableCell>
+                <TableCell className="text-right tabular-nums">{r.standing.semester.noShows}</TableCell>
+                <TableCell className="text-right tabular-nums">{r.standing.displaced}</TableCell>
+                <TableCell className="text-right tabular-nums">{r.standing.autoApproved}</TableCell>
+                <TableCell className="whitespace-nowrap text-xs">{r.standing.lastRequestAt ? formatTimestamp(r.standing.lastRequestAt) : 'None'}</TableCell>
+                <TableCell className="whitespace-nowrap">{r.mostUsedRoom}</TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       </div>
-      <ul className="grid gap-3 md:hidden">
-        {sorted.map((row) => (
-          <li key={row.organisation.id}>
-            <Link
-              href={`/admin/bookings/organisations/${row.organisation.code.toLowerCase()}`}
-              className="block rounded-lg border border-border bg-card p-3 hover:bg-accent/40"
-            >
-              <OrgChip code={row.organisation.code} colour={row.organisation.colour} name={row.organisation.name} />
-              <p className="text-xs text-muted-foreground">{row.authorityLabel}</p>
-              <p className="mt-2 text-sm">
-                {row.requests} requests · {row.confirmed} confirmed · {row.rejected} rejected
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {row.cancellations} cancelled · {row.displaced} displaced · {row.autoApproved} auto-approved
-              </p>
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </>
+      <p className="text-xs text-muted-foreground">No-shows, late cancels and the semester totals are mocked. Check-in is not tracked yet.</p>
+    </div>
   )
 }

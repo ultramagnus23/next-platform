@@ -100,7 +100,7 @@ export function formatDateTime(date: string, startMin: number, endMin: number): 
 
 /** 'AC-02 · First floor · 201' */
 export function formatVenue(room: Pick<Room, 'building' | 'floor' | 'name'>): string {
-  return `${room.building} · ${room.floor} floor · ${room.name}`
+  return room.floor ? `${room.building}, ${room.floor} floor, ${room.name}` : `${room.building}, ${room.name}`
 }
 
 /** '2 days', '5 hours', '12 minutes' */
@@ -182,4 +182,26 @@ export function formatMonth(date: string): string {
   const d = new Date(Date.parse(`${date}T00:00:00Z`))
   const names = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
   return `${names[d.getUTCMonth()]} ${d.getUTCFullYear()}`
+}
+
+/** '6 to 8 PM', '5:30 to 7 PM', '11 AM to 1 PM' */
+export function formatCompactRange(startMin: number, endMin: number): string {
+  const part = (min: number, withSuffix: boolean) => {
+    const h24 = Math.floor(min / 60) % 24
+    const m = min % 60
+    const h12 = h24 % 12 === 0 ? 12 : h24 % 12
+    const suffix = h24 >= 12 ? 'PM' : 'AM'
+    return `${h12}${m ? `:${String(m).padStart(2, '0')}` : ''}${withSuffix ? ` ${suffix}` : ''}`
+  }
+  const sameHalf = Math.floor(startMin / 720) === Math.floor(endMin / 720)
+  return `${part(startMin, !sameHalf)} to ${part(endMin, true)}`
+}
+
+/** 'Thu 12 Nov, 6 to 8 PM' */
+export function formatCompactDateTime(date: string, startMin: number, endMin: number): string {
+  return `${formatDate(date)}, ${formatCompactRange(startMin, endMin)}`
+}
+
+export function addHours(iso: string, hours: number): string {
+  return new Date(Date.parse(iso) + hours * 3_600_000).toISOString()
 }

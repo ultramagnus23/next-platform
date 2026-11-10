@@ -8,7 +8,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     const gate = await authorise()
     if ('response' in gate) return gate.response
     const { id } = await params
-    return fromResult(await getBookingService().getDetail(gate.actor, id))
+    return fromResult(await getBookingService().getRequestDetail(gate.actor, id))
   } catch (err) {
     platform.error('GET /api/admin/bookings/requests/[id] error:', err)
     return fail(500, 'Internal server error')

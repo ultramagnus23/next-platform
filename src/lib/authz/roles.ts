@@ -17,7 +17,7 @@
 
 import { always, byEnvList } from './assigners'
 import type { AssignContext, RoleDefinition, Sport, SportDefinition } from './types'
-import { isBookingAuthorityMember } from '@/app/admin/bookings/_server/authorities'
+import { isBookingOfficeMember } from '@/app/admin/bookings/_server/offices'
 
 function defineRole<const Id extends string>(role: RoleDefinition<Id>): RoleDefinition<Id> {
   return role
@@ -34,9 +34,9 @@ export const ROLES = [
   defineRole({
     id: 'booking_authority',
     label: 'Booking Authority',
-    description: 'Listed under an authority in BOOKING_AUTHORITIES. Reviews room booking requests.',
+    description: 'Listed under an office in BOOKING_OFFICES. Reviews room booking requests.',
     access: ['platform', 'booking_admin'],
-    assign: (ctx) => isBookingAuthorityMember(ctx.email),
+    assign: (ctx) => isBookingOfficeMember(ctx.email),
   }),
   defineRole({
     id: 'user',

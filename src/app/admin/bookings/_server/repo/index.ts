@@ -7,7 +7,7 @@ import { buildSeed } from './seed'
  * Today: in memory. Later: a Strapi implementation returned from here.
  */
 
-const GLOBAL_KEY = '__bookingRepository__'
+const GLOBAL_KEY = '__bookingRepositoryV2__'
 
 type GlobalWithRepo = typeof globalThis & { [GLOBAL_KEY]?: BookingRepository }
 
@@ -22,7 +22,7 @@ export function getBookingRepository(): BookingRepository {
 
 /** An isolated repository with exactly the data you give it. For scenario checks. */
 export function createIsolatedRepository(data: BookingSeedData): BookingRepository {
-  return new MemoryBookingRepository(() => data)
+  return new MemoryBookingRepository(() => structuredClone(data))
 }
 
 export type { BookingRepository, BookingSeedData } from './repository'

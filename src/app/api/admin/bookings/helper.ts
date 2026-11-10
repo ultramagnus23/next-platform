@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
-import { isDemoMode, isDevBypass } from '@/app/admin/bookings/_server/authorities'
+import { isDemoMode, isDevBypass } from '@/app/admin/bookings/_server/offices'
 import { resolveActor } from '@/app/admin/bookings/_server/actor'
-import type { Actor, BookingRequest, ServiceResult } from '@/app/admin/bookings/types'
+import type { Actor, Blocker, ServiceResult } from '@/app/admin/bookings/types'
 
 /**
  * Shared by every booking route. Order matters: requireAuth first, then the
@@ -11,18 +11,18 @@ import type { Actor, BookingRequest, ServiceResult } from '@/app/admin/bookings/
 
 export type ApiBody<T> =
   | { success: true; data: T }
-  | { success: false; error: string; blocking?: BookingRequest[] }
+  | { success: false; error: string; blockers?: Blocker[] }
 
 export function ok<T>(data: T): NextResponse<ApiBody<T>> {
   return NextResponse.json({ success: true, data })
 }
 
-export function fail(status: number, error: string, blocking?: BookingRequest[]): NextResponse<ApiBody<never>> {
-  return NextResponse.json(blocking ? { success: false, error, blocking } : { success: false, error }, { status })
+export function fail(status: number, error: string, blockers?: Blocker[]): NextResponse<ApiBody<never>> {
+  return NextResponse.json(blockers ? { success: false, error, blockers } : { success: false, error }, { status })
 }
 
 export function fromResult<T>(result: ServiceResult<T>): NextResponse<ApiBody<T>> {
-  return result.ok ? ok(result.data) : fail(result.code, result.error, result.blocking)
+  return result.ok ? ok(result.data) : fail(result.code, result.error, result.blockers)
 }
 
 export async function authorise(): Promise<{ actor: Actor } | { response: NextResponse<ApiBody<never>> }> {

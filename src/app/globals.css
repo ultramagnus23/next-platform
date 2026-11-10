@@ -464,3 +464,8 @@ html.dark .custom-scrollbar:hover::-webkit-scrollbar-thumb {
   background-color: #6b7280;
   /* gray-500 */
 }
+/* Room booking portal: compact, left-aligned headings (the global ones are large and centred). */
+.booking-scope h1 { text-align: left; font-size: 1.5rem; line-height: 2rem; font-weight: 800; }
+.booking-scope h2 { text-align: left; font-size: 1rem; line-height: 1.5rem; font-weight: 700; }
+.booking-scope h3 { text-align: left; font-size: 0.875rem; line-height: 1.25rem; font-weight: 700; }
+.booking-scope h2.pane-title { font-size: 1.375rem; line-height: 1.75rem; font-weight: 800; }

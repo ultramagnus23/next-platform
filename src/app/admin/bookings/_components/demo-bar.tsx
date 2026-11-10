@@ -2,68 +2,80 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { MoreHorizontal, Play } from 'lucide-react'
+import { MoreHorizontal } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DEMO_BANNER, PERSONAS } from '../data'
-import type { PersonaId } from '../types'
-import { postJson } from './use-booking-action'
+import type { OfficeId, PersonaId } from '../types'
 import { SIMULATE_EVENT, SimulateDialog, type SimulateOptions, type SimulatePrefill } from './simulate-dialog'
+import { postJson } from './use-booking-action'
 
-interface DemoBarProps {
+interface BookingBarProps {
+  demo: boolean
   persona: PersonaId | null
+  actingFor: OfficeId
+  offices: Array<{ id: OfficeId; label: string }>
   options: SimulateOptions
+  clockLabel: string | null
 }
 
-/** Demo-only controls: persona switcher, simulated submission and reset. */
-export function DemoBar({ persona, options }: DemoBarProps) {
+/** Acting-for select for everyone, plus demo controls when demo mode is on. */
+export function BookingBar({ demo, persona, actingFor, offices, options, clockLabel }: BookingBarProps) {
   const router = useRouter()
   const [simulateOpen, setSimulateOpen] = useState(false)
   const [prefill, setPrefill] = useState<SimulatePrefill | null>(null)
 
   useEffect(() => {
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<SimulatePrefill>).detail
-      setPrefill(detail ?? null)
+      setPrefill((event as CustomEvent<SimulatePrefill>).detail ?? null)
       setSimulateOpen(true)
     }
     window.addEventListener(SIMULATE_EVENT, handler)
     return () => window.removeEventListener(SIMULATE_EVENT, handler)
   }, [])
 
-  async function switchPersona(next: string) {
-    const result = await postJson('/demo/persona', { persona: next })
+  async function post(path: string, body: unknown, ok: string) {
+    const result = await postJson(path, body)
     if (!result.success) {
-      toast.error(result.error ?? 'Could not switch persona.')
+      toast.error(result.error ?? 'Something went wrong.')
       return
     }
+    if (ok) toast.success(ok)
     router.refresh()
   }
 
-  async function resetData() {
-    const result = await postJson('/demo/reset', {})
-    if (result.success) {
-      toast.success('Demo data reset.')
-      router.refresh()
-    } else {
-      toast.error(result.error ?? 'Could not reset demo data.')
-    }
-  }
+  const actingSelect = offices.length > 1 && !demo && (
+    <label className="flex items-center gap-2 text-sm">
+      <span className="whitespace-nowrap">Acting for</span>
+      <Select value={actingFor} onValueChange={(v) => post('/acting-for', { office: v }, '')}>
+        <SelectTrigger className="h-8 w-52 bg-background" aria-label="Acting for">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {offices.map((o) => (
+            <SelectItem key={o.id} value={o.id}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </label>
+  )
+
+  if (!demo) return actingSelect || null
 
   return (
     <div className="flex flex-col gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-950 sm:flex-row sm:items-center sm:justify-between dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
-      <p>{DEMO_BANNER}</p>
+      <p>
+        {DEMO_BANNER}
+        {clockLabel && <span className="ml-2 font-medium">{clockLabel}</span>}
+      </p>
       <div className="flex flex-wrap items-center gap-2">
         <label className="flex items-center gap-2">
           <span className="whitespace-nowrap">Viewing as</span>
-          <Select value={persona ?? undefined} onValueChange={switchPersona}>
+          <Select value={persona ?? undefined} onValueChange={(v) => post('/demo/persona', { persona: v }, '')}>
             <SelectTrigger className="h-8 w-44 bg-background" aria-label="Viewing as">
               <SelectValue placeholder="Choose a persona" />
             </SelectTrigger>
@@ -76,17 +88,6 @@ export function DemoBar({ persona, options }: DemoBarProps) {
             </SelectContent>
           </Select>
         </label>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => {
-            setPrefill(null)
-            setSimulateOpen(true)
-          }}
-        >
-          <Play className="h-4 w-4" aria-hidden="true" />
-          Simulate request
-        </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button size="icon" variant="ghost" className="h-8 w-8" aria-label="More demo actions">
@@ -94,7 +95,16 @@ export function DemoBar({ persona, options }: DemoBarProps) {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={resetData}>Reset demo data</DropdownMenuItem>
+            <DropdownMenuItem
+              onSelect={() => {
+                setPrefill(null)
+                setSimulateOpen(true)
+              }}
+            >
+              Simulate a club request
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => post('/demo/advance-clock', { days: 1 }, 'Clock moved forward one day.')}>Advance clock 1 day</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => post('/demo/reset', {}, 'Demo data reset.')}>Reset demo data</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

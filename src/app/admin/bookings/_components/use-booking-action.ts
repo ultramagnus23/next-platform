@@ -1,55 +1,55 @@
 'use client'
 
-import { useCallback, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { API_BASE } from '../data'
-import type { ActionInput, BookingRequest } from '../types'
+import type { Blocker } from '../types'
 
-interface ApiResult {
+export interface ApiResult<T = unknown> {
   success: boolean
   error?: string
-  blocking?: BookingRequest[]
+  blockers?: Blocker[]
+  data?: T
 }
 
-export const STALE_MESSAGE = 'This request changed while you were looking at it. Reloaded with the latest version.'
+export const STALE_MESSAGE = 'This request changed while you were looking at it. Reloaded.'
 
-/** Posts JSON to a booking route, shows a toast and refreshes the page. */
-export async function postJson(path: string, body: unknown): Promise<ApiResult> {
+export async function postJson<T = unknown>(path: string, body: unknown): Promise<ApiResult<T>> {
   try {
     const response = await fetch(`${API_BASE}${path}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     })
-    const json = (await response.json()) as ApiResult
+    const json = (await response.json()) as ApiResult<T>
     return { ...json, success: response.ok && json.success }
   } catch {
     return { success: false, error: 'Network error. Try again.' }
   }
 }
 
-export function useBookingAction(requestId: string) {
+/** A toast with Undo that stays for the undo window (10 seconds). */
+export function useUndoToast() {
   const router = useRouter()
-  const [pending, setPending] = useState(false)
-
-  const run = useCallback(
-    async (input: ActionInput, successMessage: string): Promise<boolean> => {
-      setPending(true)
-      const result = await postJson(`/requests/${requestId}/actions`, input)
-      setPending(false)
-      if (result.success) {
-        toast.success(successMessage)
-        router.refresh()
-        return true
-      }
-      const stale = result.error?.startsWith('This request changed')
-      toast.error(stale ? STALE_MESSAGE : (result.error ?? 'Something went wrong.'))
-      if (stale) router.refresh()
-      return false
-    },
-    [requestId, router],
-  )
-
-  return { run, pending }
+  return (message: string, batchId: string | null | undefined) => {
+    if (!batchId) {
+      toast.success(message)
+      return
+    }
+    toast.success(message, {
+      duration: 10_000,
+      action: {
+        label: 'Undo',
+        onClick: async () => {
+          const result = await postJson('/undo', { batchId })
+          if (result.success) {
+            toast.success('Undone. Emails that were queued have been cancelled.')
+            router.refresh()
+          } else {
+            toast.error(result.error ?? 'Could not undo.')
+          }
+        },
+      },
+    })
+  }
 }

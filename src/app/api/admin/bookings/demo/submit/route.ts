@@ -11,8 +11,7 @@ export async function POST(request: Request) {
     const parsed = demoSubmitSchema.safeParse(await readJson(request))
     if (!parsed.success) return fail(400, 'Check the request details.')
     const service = getBookingService()
-    const orgs = await service.listOrganisations()
-    const org = orgs.find((o) => o.id === parsed.data.organisationId)
+    const org = (await service.listOrganisations()).find((o) => o.id === parsed.data.organisationId)
     if (!org) return fail(400, 'Unknown organisation.')
     return fromResult(await service.submit({ ...parsed.data, submittedBy: org.contactEmail }))
   } catch (err) {

@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
+import { z } from 'zod'
 import { personaSchema } from '@/app/admin/bookings/schema'
 import { PERSONA_COOKIE } from '@/app/admin/bookings/_server/actor'
 import { authoriseDemo, fail, readJson, type ApiBody } from '../../helper'
-import { z } from 'zod'
 
 export const dynamic = 'force-dynamic'
 
@@ -14,10 +14,7 @@ export async function POST(request: Request) {
     if ('response' in gate) return gate.response
     const parsed = bodySchema.safeParse(await readJson(request))
     if (!parsed.success) return fail(400, 'Unknown persona.')
-    const response = NextResponse.json<ApiBody<{ persona: string }>>({
-      success: true,
-      data: { persona: parsed.data.persona },
-    })
+    const response = NextResponse.json<ApiBody<{ persona: string }>>({ success: true, data: { persona: parsed.data.persona } })
     response.cookies.set(PERSONA_COOKIE, parsed.data.persona, {
       httpOnly: true,
       sameSite: 'lax',

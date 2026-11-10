@@ -1,5 +1,4 @@
 import { redirect } from 'next/navigation'
-import { BookingsPageHeader } from '../_components/page-header'
 import { OutboxView } from '../_components/outbox-view'
 import { resolveActor } from '../_server/actor'
 import { getBookingService } from '../_server/service'
@@ -22,13 +21,12 @@ export default async function OutboxPage({ searchParams }: { searchParams: Promi
   const emails = await getBookingService().getOutbox(actor, { trigger, requestId })
 
   return (
-    <>
-      <BookingsPageHeader
-        title="Outbox"
-        subheading="Every email the system would send. Nothing leaves the platform in the demo."
-        crumbs={[{ label: 'Outbox' }]}
-      />
-      <OutboxView emails={emails} trigger={trigger} requestId={requestId} />
-    </>
+    <div className="grid gap-4">
+      <header>
+        <h1>Sent emails</h1>
+        <p className="text-sm text-muted-foreground">Every email the system would send. Nothing leaves the platform in the demo.</p>
+      </header>
+      <OutboxView emails={emails.slice(0, 300)} trigger={trigger} requestId={requestId} />
+    </div>
   )
 }

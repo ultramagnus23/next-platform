@@ -12,17 +12,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!parsed.success) return fail(400, 'Check the new details.')
     const { id } = await params
     const service = getBookingService()
-    // The organisation resubmits, so the demo acts as a super admin for this one step.
+    // The organisation acts here, so the demo borrows super admin rights for this one step.
     const organisationActor = { ...gate.actor, isSuperAdmin: true }
-    const detail = await service.getDetail(organisationActor, id)
+    const detail = await service.getRequestDetail(organisationActor, id)
     if (!detail.ok) return fromResult(detail)
-    return fromResult(
-      await service.performAction(organisationActor, id, {
-        action: 'resubmit',
-        version: detail.data.request.version,
-        changes: parsed.data,
-      }),
-    )
+    return fromResult(await service.performAction(organisationActor, id, { action: 'resubmit', version: detail.data.request.version, changes: parsed.data }))
   } catch (err) {
     platform.error('POST /api/admin/bookings/demo/resubmit/[id] error:', err)
     return fail(500, 'Internal server error')

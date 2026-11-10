@@ -41,6 +41,11 @@ export interface SimulatePrefill {
 }
 
 interface SimulateDialogProps {
+  /** Route that receives the booking. Defaults to the demo club submission. */
+  endpoint?: string
+  title?: string
+  intro?: string
+  submitLabel?: string
   open: boolean
   onOpenChange: (open: boolean) => void
   options: SimulateOptions
@@ -53,7 +58,7 @@ function toMinutes(value: string): number {
 }
 
 /** Simulates an organisation submitting a request. Demo mode only. */
-export function SimulateDialog({ open, onOpenChange, options, prefill }: SimulateDialogProps) {
+export function SimulateDialog({ open, onOpenChange, options, prefill, endpoint = '/demo/submit', title = 'Simulate a club request', intro = 'Acts as the club. The request starts at the first step of its approval chain.', submitLabel = 'Submit request' }: SimulateDialogProps) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
   const [organisationId, setOrganisationId] = useState(options.organisations[0]?.id ?? '')
@@ -80,7 +85,7 @@ export function SimulateDialog({ open, onOpenChange, options, prefill }: Simulat
 
   async function submit() {
     setBusy(true)
-    const result = await postJson('/demo/submit', {
+    const result = await postJson(endpoint, {
       organisationId,
       eventName,
       category,
@@ -105,10 +110,8 @@ export function SimulateDialog({ open, onOpenChange, options, prefill }: Simulat
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Simulate a request</DialogTitle>
-          <DialogDescription>
-            Acts as the organisation. The request starts at the first stage of its approval chain.
-          </DialogDescription>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{intro}</DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
           <div className="grid gap-1.5">

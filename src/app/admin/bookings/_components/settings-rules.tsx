@@ -70,7 +70,7 @@ export function RulesTab({ rules, categories, buildings, disabled, onChange }: R
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor={`${rule.id}-lead`}>Least hours of notice</Label>
-                <Input id={`${rule.id}-lead`} type="number" min={1} disabled={disabled} value={c.minLeadTimeHours ?? ''} onChange={(e) => cond(rule.id, { minLeadTimeHours: toNum(e.target.value) })} />
+                <Input id={`${rule.id}-lead`} type="number" min={1} disabled={disabled} value={c.minNoticeHours ?? ''} onChange={(e) => cond(rule.id, { minNoticeHours: toNum(e.target.value) })} />
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor={`${rule.id}-cap`}>Most per organisation per week</Label>

@@ -19,11 +19,9 @@ export async function PUT(request: Request) {
   try {
     const gate = await authorise()
     if ('response' in gate) return gate.response
-    if (!gate.actor.canEditSettings) return fail(403, 'Only a super admin can change settings.')
+    if (!gate.actor.canEditRules) return fail(403, 'Only a super admin can change rules.')
     const parsed = settingsSchema.safeParse(await readJson(request))
-    if (!parsed.success) {
-      return fail(400, parsed.error.issues[0]?.message ?? 'Check the settings.')
-    }
+    if (!parsed.success) return fail(400, parsed.error.issues[0]?.message ?? 'Check the rules.')
     return fromResult(await getBookingService().saveSettings(gate.actor, parsed.data))
   } catch (err) {
     platform.error('PUT /api/admin/bookings/settings error:', err)

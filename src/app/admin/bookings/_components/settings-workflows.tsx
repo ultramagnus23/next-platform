@@ -6,11 +6,11 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import type { Authority, AuthorityId, CategoryId, EventCategory, WorkflowTemplate } from '../types'
+import type { Office, OfficeId, CategoryId, EventCategory, WorkflowTemplate } from '../types'
 
 interface WorkflowsTabProps {
   workflows: WorkflowTemplate[]
-  authorities: Authority[]
+  offices: Office[]
   categories: EventCategory[]
   disabled: boolean
   onChange: (next: WorkflowTemplate[]) => void
@@ -19,17 +19,17 @@ interface WorkflowsTabProps {
 interface Draft {
   id: string | null
   name: string
-  authorityId: AuthorityId | 'any'
+  officeId: OfficeId | 'any'
   categories: CategoryId[]
-  stages: AuthorityId[]
+  stages: OfficeId[]
 }
 
-const EMPTY: Draft = { id: null, name: '', authorityId: 'any', categories: [], stages: [] }
+const EMPTY: Draft = { id: null, name: '', officeId: 'any', categories: [], stages: [] }
 
-export function WorkflowsTab({ workflows, authorities, categories, disabled, onChange }: WorkflowsTabProps) {
+export function WorkflowsTab({ workflows, offices, categories, disabled, onChange }: WorkflowsTabProps) {
   const [draft, setDraft] = useState<Draft | null>(null)
-  const label = (id: AuthorityId) => authorities.find((a) => a.id === id)?.shortLabel ?? id
-  const finals = authorities.filter((a) => a.isFinal).map((a) => a.id)
+  const label = (id: OfficeId) => offices.find((a) => a.id === id)?.shortLabel ?? id
+  const finals = offices.filter((a) => a.isFinal).map((a) => a.id)
 
   const lastStage = draft?.stages[draft.stages.length - 1]
   const endsFinal = lastStage !== undefined && finals.includes(lastStage)
@@ -41,7 +41,7 @@ export function WorkflowsTab({ workflows, authorities, categories, disabled, onC
       id: draft.id ?? `wf-${Date.now().toString(36)}`,
       name: draft.name.trim(),
       match: {
-        ...(draft.authorityId !== 'any' ? { authorityId: draft.authorityId } : {}),
+        ...(draft.officeId !== 'any' ? { officeId: draft.officeId } : {}),
         ...(draft.categories.length > 0 ? { categories: draft.categories } : {}),
       },
       stages: draft.stages,
@@ -64,7 +64,7 @@ export function WorkflowsTab({ workflows, authorities, categories, disabled, onC
               <p className="font-medium">{w.name}</p>
               <p className="text-sm text-muted-foreground">
                 {[
-                  w.match.authorityId ? `Organisations governed by ${label(w.match.authorityId)}` : 'Any organisation',
+                  w.match.officeId ? `Organisations governed by ${label(w.match.officeId)}` : 'Any organisation',
                   w.match.categories?.length
                     ? `categories: ${w.match.categories.map((c) => categories.find((x) => x.id === c)?.label ?? c).join(', ')}`
                     : 'any category',
@@ -81,7 +81,7 @@ export function WorkflowsTab({ workflows, authorities, categories, disabled, onC
                     setDraft({
                       id: w.id,
                       name: w.name,
-                      authorityId: w.match.authorityId ?? 'any',
+                      officeId: w.match.officeId ?? 'any',
                       categories: w.match.categories ?? [],
                       stages: w.stages,
                     })
@@ -115,13 +115,13 @@ export function WorkflowsTab({ workflows, authorities, categories, disabled, onC
           </div>
           <div className="grid gap-1.5">
             <Label htmlFor="wf-authority">Applies to organisations governed by</Label>
-            <Select value={draft.authorityId} onValueChange={(v) => setDraft({ ...draft, authorityId: v as Draft['authorityId'] })}>
+            <Select value={draft.officeId} onValueChange={(v) => setDraft({ ...draft, officeId: v as Draft['officeId'] })}>
               <SelectTrigger id="wf-authority">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="any">Any authority</SelectItem>
-                {authorities.map((a) => (
+                {offices.map((a) => (
                   <SelectItem key={a.id} value={a.id}>
                     {a.shortLabel}
                   </SelectItem>
@@ -156,12 +156,12 @@ export function WorkflowsTab({ workflows, authorities, categories, disabled, onC
                   {i + 1}. {label(s)} ×
                 </Button>
               ))}
-              <Select value="" onValueChange={(v) => setDraft({ ...draft, stages: [...draft.stages, v as AuthorityId] })}>
+              <Select value="" onValueChange={(v) => setDraft({ ...draft, stages: [...draft.stages, v as OfficeId] })}>
                 <SelectTrigger className="h-8 w-44" aria-label="Add a stage">
                   <SelectValue placeholder="Add a stage" />
                 </SelectTrigger>
                 <SelectContent>
-                  {authorities.map((a) => (
+                  {offices.map((a) => (
                     <SelectItem key={a.id} value={a.id}>
                       {a.shortLabel}
                     </SelectItem>

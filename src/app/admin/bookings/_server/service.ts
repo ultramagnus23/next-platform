@@ -1,63 +1,63 @@
 import type {
   Actor,
   ActionInput,
-  ActionOutcome,
-  ActivityItem,
   ApprovalLog,
+  BatchSnapshot,
+  Blocker,
   BookingRequest,
   BookingSettings,
-  CalendarData,
-  CalendarFilters,
-  CalendarItem,
-  QueueGroup,
-  RoomBoardItem,
-  RoomHolder,
-  SearchHit,
-  ConflictGroupView,
-  ConflictMemberView,
+  BulkResult,
+  ClashGroupView,
+  ClashMemberView,
+  ClockState,
   EngineContext,
+  FreeRoom,
   FreeRoomQuery,
+  InboxData,
+  InboxFilters,
+  InboxRow,
+  Lane,
+  MutationOutcome,
   Organisation,
-  OrganisationRecord,
-  OrganisationStats,
-  OverviewData,
-  RoomUsageItem,
+  OrgRow,
   OutboxEmail,
   RequestDetail,
   RequestDraft,
-  RequestFilters,
-  RequestRow,
   ResolveInput,
-  ResolveOutcome,
   Room,
+  RoomsDayData,
+  RoomsDayQuery,
   ServiceResult,
-  TimelineBlock,
   TransitionError,
+  TransitionSuccess,
 } from '../types'
-import { actsForFinalAuthority, canResolveConflicts, needsMyAction, visibilityOf } from './access'
-import { freeRooms, roomDaySchedule } from './engine/availability'
-import { conflictsFor, findConflictGroups, findGroupById, findGroupContaining, warningsFor } from './engine/conflicts'
+import { addDays, todayIST } from '../utils'
+import { canResolveClashes, visibilityOf, waitingOnMe } from './access'
+import { freeRooms, roomDay, roomsDay } from './engine/availability'
+import { chipFor, flagsFor, laneFor, orgStanding, overdueHours } from './engine/flags'
+import { allClashGroups, clashesFor, clashGroupContaining, findClashGroup } from './engine/occupancy'
 import { rankGroup } from './engine/priority'
-import { availableActions, submitRequest, transition } from './engine/workflow'
-import { addDays, endOfMonth, IST_OFFSET_MIN, startOfMonth, startOfWeek, todayIST } from '../utils'
+import { availableActions, directBooking, submitRequest, sweep, transition, undoBatch } from './engine/workflow'
 import { KeyedMutex, lockKey } from './lock'
 import { getBookingRepository, type BookingRepository } from './repo'
 
 /**
- * The only caller of the repository. Every mutation takes the room-date lock,
- * loads fresh data, runs the engine, checks versions, then saves requests,
- * logs and outbox together.
+ * The only caller of the repository. Every mutation runs the sweep, takes the
+ * room-date locks, loads fresh data, runs the engine, checks versions, then
+ * saves requests, logs, outbox and an undo snapshot together.
  */
 
 const ID_LOCK = '__ids__'
 const MAX_LOCK_RETRIES = 3
+const PAGE_SIZE = 50
+const LANE_ORDER: Record<Lane, number> = { clash: 0, look: 1, clear: 2 }
 
-function failure(code: 400 | 403 | 404 | 409, error: string, blocking?: BookingRequest[]): ServiceResult<never> {
-  return blocking ? { ok: false, code, error, blocking } : { ok: false, code, error }
+function failure(code: 400 | 403 | 404 | 409, error: string, blockers?: Blocker[]): ServiceResult<never> {
+  return blockers && blockers.length > 0 ? { ok: false, code, error, blockers } : { ok: false, code, error }
 }
 
 function fromEngineError(e: TransitionError): ServiceResult<never> {
-  return failure(e.code, e.error, e.blocking)
+  return failure(e.code, e.error, e.blockers)
 }
 
 let idCounter = 0
@@ -66,66 +66,96 @@ function runtimeId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}${idCounter.toString(36)}`
 }
 
-function nextRequestId(requests: BookingRequest[], nowIso: string): string {
-  let max = 0
+function nextRequestId(requests: BookingRequest[]): string {
+  let max = 1000
   for (const r of requests) {
-    const match = /^BK-\d{4}-(\d+)$/.exec(r.id)
+    const match = /^BK-(\d+)$/.exec(r.id)
     if (match) max = Math.max(max, Number(match[1]))
   }
-  return `BK-${nowIso.slice(0, 4)}-${String(max + 1).padStart(4, '0')}`
+  return `BK-${max + 1}`
 }
 
 export class BookingService {
   private readonly mutex = new KeyedMutex()
+  private offsetMs = 0
 
   constructor(
     private readonly repo: BookingRepository,
     private readonly clock: () => string = () => new Date().toISOString(),
   ) {}
 
+  /** The service's idea of now. The demo can move it forward. */
+  now(): string {
+    return new Date(Date.parse(this.clock()) + this.offsetMs).toISOString()
+  }
+
+  clockState(): ClockState {
+    return { now: this.now(), offsetDays: Math.round(this.offsetMs / 86_400_000) }
+  }
+
   /* ---------------- Context ---------------- */
 
   private async loadContext(): Promise<EngineContext> {
-    const [settings, rooms, organisations, requests] = await Promise.all([
+    const [settings, rooms, organisations, requests, timetable] = await Promise.all([
       this.repo.getSettings(),
       this.repo.listRooms(),
       this.repo.listOrganisations(),
       this.repo.listRequests(),
+      this.repo.listTimetable(),
     ])
-    const now = this.clock()
     return {
       settings,
       rooms,
       organisations,
+      timetable,
       requests,
-      newId: (kind) => (kind === 'request' ? nextRequestId(requests, now) : runtimeId(kind === 'log' ? 'LOG' : 'EM')),
+      newId: (kind) => (kind === 'request' ? nextRequestId(requests) : runtimeId(kind === 'log' ? 'LOG' : 'EM')),
     }
   }
 
-  private async persist(
-    requests: BookingRequest[],
-    logs: ApprovalLog[],
-    emails: OutboxEmail[],
-  ): Promise<void> {
-    if (requests.length > 0) await this.repo.saveRequests(requests)
-    if (logs.length > 0) await this.repo.appendLogs(logs)
-    if (emails.length > 0) await this.repo.appendOutbox(emails)
+  /** Lapses offers, expires started events and sends overdue notices. Cheap when nothing is due. */
+  private async sweepNow(): Promise<void> {
+    const ctx = await this.loadContext()
+    const result = sweep(ctx, this.now())
+    if (result.requests.length === 0 && result.logs.length === 0 && result.emails.length === 0) return
+    await this.repo.saveRequests(result.requests)
+    await this.repo.appendLogs(result.logs)
+    await this.repo.appendOutbox(result.emails)
   }
 
-  /**
-   * Locks the request's room and date, plus any extra keys, then runs `task`.
-   * If the request moved between the first read and the lock, tries again with
-   * the right keys.
-   */
-  private async withRequestLock<T>(
-    requestId: string,
-    extraKeys: string[],
-    task: () => Promise<ServiceResult<T>>,
-  ): Promise<ServiceResult<T>> {
+  private async fresh(): Promise<EngineContext> {
+    await this.sweepNow()
+    return this.loadContext()
+  }
+
+  /** Saves a mutation and an undo snapshot, tagging logs and emails with one batch id. */
+  private async commit(
+    actor: Actor,
+    kind: BatchSnapshot['kind'],
+    ctx: EngineContext,
+    changed: BookingRequest[],
+    logs: ApprovalLog[],
+    emails: OutboxEmail[],
+  ): Promise<MutationOutcome> {
+    const batchId = runtimeId('BATCH')
+    const tagLogs = logs.map((l) => ({ ...l, batchId }))
+    const tagEmails = emails.map((e) => ({ ...e, batchId }))
+    const before = changed.map((c) => ctx.requests.find((r) => r.id === c.id)).filter((r): r is BookingRequest => r !== undefined)
+    const afterVersions: Record<string, number> = {}
+    for (const c of changed) afterVersions[c.id] = c.version
+    await this.repo.saveRequests(changed)
+    await this.repo.appendLogs(tagLogs)
+    await this.repo.appendOutbox(tagEmails)
+    await this.repo.saveBatch({ id: batchId, actorEmail: actor.email, at: this.now(), kind, before, afterVersions, undone: false })
+    return { requests: changed, logs: tagLogs, emails: tagEmails, batchId }
+  }
+
+  private async withRequestLock<T>(requestId: string, extraKeys: string[], task: () => Promise<ServiceResult<T>>): Promise<ServiceResult<T>> {
     for (let attempt = 0; attempt < MAX_LOCK_RETRIES; attempt++) {
       const before = await this.repo.getRequest(requestId)
       if (!before) return failure(404, 'Request not found.')
       const keys = [lockKey(before.roomId, before.date), ...extraKeys]
+      if (before.offer) keys.push(lockKey(before.offer.roomId, before.date))
       const release = await this.mutex.acquire(keys)
       try {
         const after = await this.repo.getRequest(requestId)
@@ -136,148 +166,211 @@ export class BookingService {
         release()
       }
     }
-    return failure(409, 'This request changed while you were looking at it. Reloaded with the latest version.')
+    return failure(409, 'This request changed while you were looking at it. Reloaded.')
   }
 
   /* ---------------- Mutations ---------------- */
 
-  async submit(draft: RequestDraft): Promise<ServiceResult<ActionOutcome>> {
+  async submit(draft: RequestDraft): Promise<ServiceResult<MutationOutcome>> {
     const release = await this.mutex.acquire([lockKey(draft.roomId, draft.date), ID_LOCK])
     try {
-      const ctx = await this.loadContext()
-      const result = submitRequest(draft, ctx, this.clock())
+      const ctx = await this.fresh()
+      const result = submitRequest(draft, ctx, this.now())
       if ('error' in result) return fromEngineError(result)
-      await this.persist([result.request], result.logs, result.emails)
-      return { ok: true, data: { request: result.request, logs: result.logs, emails: result.emails } }
-    } finally {
-      release()
-    }
-  }
-
-  async performAction(actor: Actor, requestId: string, input: ActionInput): Promise<ServiceResult<ActionOutcome>> {
-    const extraKeys: string[] = []
-    if (input.action === 'resubmit' && input.changes) {
-      const current = await this.repo.getRequest(requestId)
-      if (current) {
-        extraKeys.push(lockKey(input.changes.roomId ?? current.roomId, input.changes.date ?? current.date))
-      }
-    }
-    return this.withRequestLock(requestId, extraKeys, async () => {
-      const ctx = await this.loadContext()
-      const request = ctx.requests.find((r) => r.id === requestId)
-      if (!request) return failure(404, 'Request not found.')
-      if (visibilityOf(actor, request, ctx.requests, ctx.settings) === 'none') {
-        return failure(403, 'You cannot act on this request.')
-      }
-      const result = transition(request, input, actor, ctx, this.clock())
-      if ('error' in result) return fromEngineError(result)
-      const changed = input.action === 'remark' ? [] : [result.request, ...result.others]
-      await this.persist(changed, result.logs, result.emails)
-      return { ok: true, data: { request: result.request, logs: result.logs, emails: result.emails } }
-    })
-  }
-
-  /** Decide a whole conflict group at once. All or nothing. */
-  async resolveConflict(
-    actor: Actor,
-    groupId: string,
-    input: ResolveInput,
-    dryRun = false,
-  ): Promise<ServiceResult<ResolveOutcome>> {
-    const pre = await this.loadContext()
-    if (!canResolveConflicts(actor, pre.settings)) {
-      return failure(403, 'Only Academic Booking or a super admin can decide a conflict.')
-    }
-    const preGroup = findGroupById(groupId, pre.requests, pre.settings)
-    if (!preGroup) return failure(404, 'This conflict no longer exists.')
-    const keys = [...new Set(preGroup.members.map((m) => lockKey(m.roomId, m.date)))]
-
-    const release = await this.mutex.acquire(keys)
-    try {
-      const ctx = await this.loadContext()
-      const now = this.clock()
-      const group = findGroupContaining(input.winnerId, ctx.requests, ctx.settings)
-      const stale = 'This conflict changed while you were looking at it. Reloaded with the latest version.'
-      if (!group) return failure(409, stale)
-
-      const memberIds = new Set(group.members.map((m) => m.id))
-      const decided = [input.winnerId, ...input.others.map((o) => o.id)]
-      if (new Set(decided).size !== decided.length) return failure(400, 'Each request can be decided once.')
-      if (decided.some((id) => !memberIds.has(id))) return failure(409, stale)
-
-      for (const id of decided) {
-        const member = group.members.find((m) => m.id === id)
-        if (!member || input.versions[id] !== member.version) return failure(409, stale)
-      }
-      const uncovered = group.members.filter(
-        (m) => m.status === 'pending' && m.id !== input.winnerId && !decided.includes(m.id),
-      )
-      if (uncovered.length > 0) {
-        return failure(400, 'Every other pending request in the group needs a decision.')
-      }
-
-      let working = ctx.requests
-      const logs: ApprovalLog[] = []
-      const emails: OutboxEmail[] = []
-      const changed = new Map<string, BookingRequest>()
-      const apply = (updated: BookingRequest[]) => {
-        for (const u of updated) changed.set(u.id, u)
-        working = working.map((r) => updated.find((u) => u.id === r.id) ?? r)
-      }
-
-      for (const decision of input.others) {
-        const target = working.find((r) => r.id === decision.id)
-        if (!target) return failure(409, stale)
-        const result = transition(
-          target,
-          {
-            action: decision.action,
-            version: target.version,
-            reason: decision.reason,
-            alternativeRoomId: decision.alternativeRoomId ?? null,
-          },
-          actor,
-          { ...ctx, requests: working },
-          now,
-          { resolveGroup: true },
-        )
-        if ('error' in result) return fromEngineError(result)
-        apply([result.request, ...result.others])
-        logs.push(...result.logs)
-        emails.push(...result.emails)
-      }
-
-      const winner = working.find((r) => r.id === input.winnerId)
-      if (!winner) return failure(409, stale)
-      const won = transition(
-        winner,
-        { action: 'approve', version: winner.version },
-        actor,
-        { ...ctx, requests: working },
-        now,
-        { resolveGroup: true },
-      )
-      if ('error' in won) return fromEngineError(won)
-      apply([won.request, ...won.others])
-      logs.push(...won.logs)
-      emails.push(...won.emails)
-
-      const outcome: ResolveOutcome = { requests: [...changed.values()], logs, emails }
-      if (!dryRun) await this.persist(outcome.requests, logs, emails)
+      const outcome = await this.commit({ email: draft.submittedBy } as Actor, 'single', ctx, [result.request], result.logs, result.emails)
       return { ok: true, data: outcome }
     } finally {
       release()
     }
   }
 
+  async createDirectBooking(actor: Actor, draft: RequestDraft): Promise<ServiceResult<MutationOutcome>> {
+    const release = await this.mutex.acquire([lockKey(draft.roomId, draft.date), ID_LOCK])
+    try {
+      const ctx = await this.fresh()
+      const result = directBooking(draft, actor, ctx, this.now())
+      if ('error' in result) return fromEngineError(result)
+      return { ok: true, data: await this.commit(actor, 'single', ctx, [result.request], result.logs, result.emails) }
+    } finally {
+      release()
+    }
+  }
+
+  async performAction(actor: Actor, requestId: string, input: ActionInput): Promise<ServiceResult<MutationOutcome>> {
+    const extra: string[] = []
+    const pre = await this.repo.getRequest(requestId)
+    if (pre && input.action === 'offer_room' && input.roomId) extra.push(lockKey(input.roomId, pre.date))
+    if (pre && input.action === 'resubmit' && input.changes) extra.push(lockKey(input.changes.roomId ?? pre.roomId, input.changes.date ?? pre.date))
+    return this.withRequestLock(requestId, extra, async () => {
+      const ctx = await this.fresh()
+      const request = ctx.requests.find((r) => r.id === requestId)
+      if (!request) return failure(404, 'Request not found.')
+      if (visibilityOf(actor, request, ctx) === 'none') return failure(403, 'You cannot act on this request.')
+      const result = transition(request, input, actor, ctx, this.now())
+      if ('error' in result) return fromEngineError(result)
+      if (input.action === 'note') {
+        await this.repo.appendLogs(result.logs)
+        return { ok: true, data: { requests: [], logs: result.logs, emails: [], batchId: '' } }
+      }
+      return { ok: true, data: await this.commit(actor, 'single', ctx, result.requests, result.logs, result.emails) }
+    })
+  }
+
+  /** Approves only Clear requests, re-checking each one at action time (D11). */
+  async bulkApprove(actor: Actor, items: Array<{ id: string; version: number }>): Promise<ServiceResult<BulkResult>> {
+    const pre = await this.loadContext()
+    const keys = new Set<string>()
+    for (const item of items) {
+      const r = pre.requests.find((x) => x.id === item.id)
+      if (r) keys.add(lockKey(r.roomId, r.date))
+    }
+    const release = await this.mutex.acquire([...keys])
+    try {
+      const ctx = await this.fresh()
+      let working = ctx.requests
+      const approved: string[] = []
+      const skipped: BulkResult['skipped'] = []
+      const changed = new Map<string, BookingRequest>()
+      const logs: ApprovalLog[] = []
+      const emails: OutboxEmail[] = []
+      const now = this.now()
+      for (const item of items) {
+        const wctx: EngineContext = { ...ctx, requests: working }
+        const request = working.find((r) => r.id === item.id)
+        if (!request) {
+          skipped.push({ id: item.id, why: 'It no longer exists.' })
+          continue
+        }
+        if (request.version !== item.version) {
+          skipped.push({ id: item.id, why: 'It changed while you were looking.' })
+          continue
+        }
+        const room = ctx.rooms.find((r) => r.id === request.roomId)
+        const lane = room ? laneFor(wctx, request, flagsFor(wctx, request, room, now)) : 'look'
+        if (lane !== 'clear') {
+          skipped.push({ id: item.id, why: lane === 'clash' ? 'It now clashes with another request.' : 'It now needs a look.' })
+          continue
+        }
+        const result = transition(request, { action: 'approve', version: request.version }, actor, wctx, now)
+        if ('error' in result) {
+          skipped.push({ id: item.id, why: result.error })
+          continue
+        }
+        for (const c of result.requests) changed.set(c.id, c)
+        working = working.map((r) => result.requests.find((c) => c.id === r.id) ?? r)
+        logs.push(...result.logs)
+        emails.push(...result.emails)
+        approved.push(item.id)
+      }
+      if (approved.length === 0) return { ok: true, data: { approved, skipped, batchId: null } }
+      const outcome = await this.commit(actor, 'bulk_approve', ctx, [...changed.values()], logs, emails)
+      return { ok: true, data: { approved, skipped, batchId: outcome.batchId } }
+    } finally {
+      release()
+    }
+  }
+
+  async undo(actor: Actor, batchId: string): Promise<ServiceResult<{ restored: number }>> {
+    const batch = await this.repo.getBatch(batchId)
+    if (!batch) return failure(404, 'Nothing to undo.')
+    const keys = batch.before.map((r) => lockKey(r.roomId, r.date))
+    const release = await this.mutex.acquire(keys)
+    try {
+      const ctx = await this.loadContext()
+      const result = undoBatch(batch, actor, ctx, this.now())
+      if ('error' in result) return fromEngineError(result)
+      await this.repo.saveRequests(result.requests)
+      await this.repo.appendLogs(result.logs)
+      await this.repo.voidOutboxByBatch(batchId, 'Undone')
+      await this.repo.saveBatch({ ...batch, undone: true })
+      return { ok: true, data: { restored: result.requests.length } }
+    } finally {
+      release()
+    }
+  }
+
+  /** Decide a whole clash at once. All or nothing, one batch. */
+  async resolveClash(actor: Actor, groupId: string, input: ResolveInput, dryRun = false): Promise<ServiceResult<MutationOutcome>> {
+    const pre = await this.loadContext()
+    if (!canResolveClashes(actor, pre)) return failure(403, 'Only Academic Booking or a super admin can decide a clash.')
+    const preGroup = findClashGroup(pre, groupId)
+    if (!preGroup) return failure(404, 'This clash no longer exists.')
+    const keys = [lockKey(preGroup.roomId, preGroup.date)]
+    for (const d of input.others) {
+      if (d.roomId) keys.push(lockKey(d.roomId, preGroup.date))
+    }
+    const release = await this.mutex.acquire(keys)
+    try {
+      const ctx = await this.fresh()
+      const now = this.now()
+      const stale = 'This clash changed while you were looking at it. Reloaded.'
+      const group = clashGroupContaining(ctx, input.winnerId)
+      if (!group) return failure(409, stale)
+      const memberIds = new Set(group.members.map((m) => m.id))
+      const decided = [input.winnerId, ...input.others.map((o) => o.id)]
+      if (new Set(decided).size !== decided.length) return failure(400, 'Each request can be decided once.')
+      if (decided.some((id) => !memberIds.has(id))) return failure(409, stale)
+      for (const id of decided) {
+        const member = group.members.find((m) => m.id === id)
+        if (!member || input.versions[id] !== member.version) return failure(409, stale)
+      }
+      const uncovered = group.members.filter((m) => m.status === 'pending' && !decided.includes(m.id))
+      if (uncovered.length > 0) return failure(400, 'Every other pending request in the clash needs a decision.')
+
+      let working = ctx.requests
+      const changed = new Map<string, BookingRequest>()
+      const logs: ApprovalLog[] = []
+      const emails: OutboxEmail[] = []
+      const apply = (result: TransitionSuccess) => {
+        for (const c of result.requests) changed.set(c.id, c)
+        working = working.map((r) => result.requests.find((c) => c.id === r.id) ?? r)
+        logs.push(...result.logs)
+        emails.push(...result.emails)
+      }
+      for (const d of input.others) {
+        const target = working.find((r) => r.id === d.id)
+        if (!target) return failure(409, stale)
+        const result = transition(
+          target,
+          { action: d.action, version: target.version, reason: d.reason, roomId: d.roomId },
+          actor,
+          { ...ctx, requests: working },
+          now,
+          { resolveGroup: true },
+        )
+        if ('error' in result) return fromEngineError(result)
+        apply(result)
+      }
+      const winner = working.find((r) => r.id === input.winnerId)
+      if (!winner) return failure(409, stale)
+      const won = transition(winner, { action: 'approve', version: winner.version }, actor, { ...ctx, requests: working }, now, { resolveGroup: true })
+      if ('error' in won) return fromEngineError(won)
+      apply(won)
+
+      if (dryRun) return { ok: true, data: { requests: [...changed.values()], logs, emails, batchId: '' } }
+      return { ok: true, data: await this.commit(actor, 'resolve', ctx, [...changed.values()], logs, emails) }
+    } finally {
+      release()
+    }
+  }
+
   async saveSettings(actor: Actor, settings: BookingSettings): Promise<ServiceResult<BookingSettings>> {
-    if (!actor.canEditSettings) return failure(403, 'Only a super admin can change settings.')
+    if (!actor.canEditRules) return failure(403, 'Only a super admin can change rules.')
     await this.repo.saveSettings(settings)
     return { ok: true, data: settings }
   }
 
+  /* ---------------- Demo helpers ---------------- */
+
   async reset(): Promise<void> {
+    this.offsetMs = 0
     await this.repo.reset()
+  }
+
+  async advanceDays(days: number): Promise<ClockState> {
+    this.offsetMs += days * 86_400_000
+    await this.sweepNow()
+    return this.clockState()
   }
 
   /* ---------------- Reads ---------------- */
@@ -294,549 +387,260 @@ export class BookingService {
     return this.repo.listOrganisations()
   }
 
-  async getOutbox(
-    actor: Actor,
-    filter: { trigger?: string; requestId?: string } = {},
-  ): Promise<OutboxEmail[]> {
-    const [emails, ctx] = await Promise.all([this.repo.listOutbox(), this.loadContext()])
-    const visible = new Set(
-      ctx.requests
-        .filter((r) => visibilityOf(actor, r, ctx.requests, ctx.settings) === 'full')
-        .map((r) => r.id),
-    )
+  async getOutbox(actor: Actor, filter: { trigger?: string; requestId?: string } = {}): Promise<OutboxEmail[]> {
+    const ctx = await this.fresh()
+    const emails = await this.repo.listOutbox()
+    const visible = new Set(ctx.requests.filter((r) => visibilityOf(actor, r, ctx) === 'full').map((r) => r.id))
     return emails.filter(
-      (e) =>
-        visible.has(e.requestId) &&
-        (!filter.trigger || e.trigger === filter.trigger) &&
-        (!filter.requestId || e.requestId === filter.requestId),
+      (e) => visible.has(e.requestId) && (!filter.trigger || e.trigger === filter.trigger) && (!filter.requestId || e.requestId === filter.requestId),
     )
   }
 
-  async daySchedule(roomId: string, date: string): Promise<TimelineBlock[]> {
-    const ctx = await this.loadContext()
-    return roomDaySchedule(roomId, date, ctx.requests, ctx.settings)
+  async getRoomsDay(query: RoomsDayQuery): Promise<RoomsDayData> {
+    const ctx = await this.fresh()
+    return roomsDay(ctx, query)
   }
 
-  async findFreeRooms(query: FreeRoomQuery): Promise<Room[]> {
-    const ctx = await this.loadContext()
-    return freeRooms(query, ctx.rooms, ctx.requests, ctx.settings.changeoverBufferMin)
+  async findFree(query: FreeRoomQuery): Promise<FreeRoom[]> {
+    const ctx = await this.fresh()
+    const anchor = query.excludeRoomId ? ctx.rooms.find((r) => r.id === query.excludeRoomId) : undefined
+    return freeRooms(ctx, query, anchor).slice(0, 12)
   }
 
-  async listRequests(
-    actor: Actor,
-    filters: RequestFilters,
-  ): Promise<{ rows: RequestRow[]; counts: Record<RequestFilters['tab'], number> }> {
-    const ctx = await this.loadContext()
+  async getInbox(actor: Actor, f: InboxFilters): Promise<InboxData> {
+    const ctx = await this.fresh()
+    const now = this.now()
     const { settings, rooms, organisations, requests } = ctx
-    const rows: Array<RequestRow & { tab: Set<RequestFilters['tab']> }> = []
+    const officeName = settings.offices.find((o) => o.id === actor.actingFor)?.label ?? 'you'
+    const q = f.q?.trim().toLowerCase() ?? ''
 
+    const rows: InboxRow[] = []
+    let elsewhere = 0
     for (const request of requests) {
-      if (visibilityOf(actor, request, requests, settings) !== 'full') continue
-      const org = organisations.find((o) => o.id === request.organisationId)
+      if (request.status === 'pending' && !waitingOnMe(actor, request)) {
+        const idx = request.stages.indexOf(actor.actingFor)
+        if (idx >= 0 && idx < request.stageIndex) elsewhere += 1
+        continue
+      }
+      if (!waitingOnMe(actor, request)) continue
+      if (visibilityOf(actor, request, ctx) !== 'full') continue
+      const organisation = organisations.find((o) => o.id === request.organisationId)
       const room = rooms.find((r) => r.id === request.roomId)
-      if (!org || !room) continue
-      if (filters.dateFrom && request.date < filters.dateFrom) continue
-      if (filters.dateTo && request.date > filters.dateTo) continue
-      if (filters.organisationId && request.organisationId !== filters.organisationId) continue
-      if (filters.building && room.building !== filters.building) continue
-      if (filters.roomId && request.roomId !== filters.roomId) continue
-      if (filters.category && request.category !== filters.category) continue
-      if (filters.status && request.status !== filters.status) continue
-      if (filters.stage && request.stages[request.stageIndex] !== filters.stage) continue
-      const conflictCount = conflictsFor(request.id, requests, settings).length
-      if (filters.conflictsOnly && conflictCount === 0) continue
-
-      const mine = needsMyAction(actor, request)
-      const tabs = new Set<RequestFilters['tab']>(['all'])
-      if (mine) tabs.add('needs_action')
-      if ((request.status === 'pending' && !mine) || request.status === 'changes_requested') tabs.add('others')
-      if (request.status === 'confirmed') tabs.add('confirmed')
-      if (['rejected', 'withdrawn', 'cancelled', 'displaced'].includes(request.status)) tabs.add('closed')
-
+      if (!organisation || !room) continue
+      if (f.office && organisation.officeId !== f.office) continue
+      if (f.building && room.building !== f.building) continue
+      if (f.category && request.category !== f.category) continue
+      if (f.organisationId && request.organisationId !== f.organisationId) continue
+      if (q) {
+        const hay = `${request.id} ${request.eventName} ${organisation.name} ${room.building} ${room.name}`.toLowerCase()
+        if (!hay.includes(q)) continue
+      }
+      const flags = flagsFor(ctx, request, room, now)
+      const lane = laneFor(ctx, request, flags)
       const category = settings.categories.find((c) => c.id === request.category)
-      const stage = request.stages[request.stageIndex]
-      const stageName = settings.authorities.find((a) => a.id === stage)?.shortLabel ?? ''
       rows.push({
         request,
-        organisation: org,
-        organisationName: org.name,
-        authorityId: org.authorityId,
-        roomLabel: `${room.building} · ${room.name}`,
-        building: room.building,
+        organisationName: organisation.name,
+        kind: organisation.kind,
         categoryLabel: category?.label ?? request.category,
         tier: category?.tier ?? 99,
-        stageLabel:
-          request.status === 'pending'
-            ? `${request.stageIndex + 1} of ${request.stages.length} · ${stageName}`
-            : request.status === 'confirmed'
-              ? 'Complete'
-              : '',
-        conflictCount,
-        needsMyAction: mine,
-        tab: tabs,
+        roomLabel: `${room.building} ${room.name}`,
+        lane,
+        flags,
+        overdueDays: Math.floor(overdueHours(ctx, request, now) / 24),
+        chip: chipFor(lane, flags),
       })
     }
-
-    const counts: Record<RequestFilters['tab'], number> = {
-      needs_action: 0,
-      others: 0,
-      confirmed: 0,
-      closed: 0,
-      all: 0,
+    rows.sort(
+      (a, b) =>
+        LANE_ORDER[a.lane] - LANE_ORDER[b.lane] ||
+        (b.overdueDays > 0 ? 1 : 0) - (a.overdueDays > 0 ? 1 : 0) ||
+        a.request.date.localeCompare(b.request.date) ||
+        a.request.createdAt.localeCompare(b.request.createdAt),
+    )
+    const counts: Record<Lane, number> = { clash: 0, look: 0, clear: 0 }
+    for (const r of rows) counts[r.lane] += 1
+    const filtered = f.lane ? rows.filter((r) => r.lane === f.lane) : rows
+    const page = Math.max(1, f.page ?? 1)
+    const total = rows.length
+    return {
+      rows: filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+      counts,
+      elsewhere,
+      page,
+      pageSize: PAGE_SIZE,
+      total: filtered.length,
+      summary: `${total} ${total === 1 ? 'request is' : 'requests are'} waiting on ${officeName}. ${counts.clear} ${counts.clear === 1 ? 'has' : 'have'} nothing to check.`,
     }
-    for (const row of rows) for (const t of row.tab) counts[t] += 1
-
-    const selected = rows
-      .filter((row) => row.tab.has(filters.tab))
-      .sort(
-        (a, b) =>
-          a.request.date.localeCompare(b.request.date) ||
-          a.request.startMin - b.request.startMin ||
-          a.request.id.localeCompare(b.request.id),
-      )
-      .map(({ tab: _tab, ...row }) => row)
-    return { rows: selected, counts }
   }
 
-  async getDetail(actor: Actor, id: string): Promise<ServiceResult<RequestDetail>> {
-    const ctx = await this.loadContext()
-    const { settings, rooms, organisations, requests } = ctx
-    const request = requests.find((r) => r.id === id)
+  async getRequestDetail(actor: Actor, id: string): Promise<ServiceResult<RequestDetail>> {
+    const ctx = await this.fresh()
+    const now = this.now()
+    const request = ctx.requests.find((r) => r.id === id)
     if (!request) return failure(404, 'Request not found.')
-    const visibility = visibilityOf(actor, request, requests, settings)
+    const visibility = visibilityOf(actor, request, ctx)
     if (visibility === 'none') return failure(404, 'Request not found.')
-    const organisation = organisations.find((o) => o.id === request.organisationId)
-    const room = rooms.find((r) => r.id === request.roomId)
+    const organisation = ctx.organisations.find((o) => o.id === request.organisationId)
+    const room = ctx.rooms.find((r) => r.id === request.roomId)
     if (!organisation || !room) return failure(404, 'This request points to missing data.')
-
-    const group = findGroupContaining(id, requests, settings)
-    const allLogs = await this.repo.listLogs(id)
-    const category = settings.categories.find((c) => c.id === request.category)
+    const flags = flagsFor(ctx, request, room, now)
+    const group = clashGroupContaining(ctx, id)
+    const category = ctx.settings.categories.find((c) => c.id === request.category)
+    const logs = await this.repo.listLogs(id)
     return {
       ok: true,
       data: {
         request,
-        visibility,
         organisation,
+        standing: orgStanding(ctx, organisation, now),
         room,
         categoryLabel: category?.label ?? request.category,
-        logs: visibility === 'full' ? allLogs : allLogs.filter((l) => !l.internal),
-        conflicts: conflictsFor(id, requests, settings),
+        tier: category?.tier ?? 99,
+        lane: laneFor(ctx, request, flags),
+        flags,
+        clashes: clashesFor(ctx, id),
         groupId: group?.id ?? null,
-        ranks: group ? rankGroup(group.members.filter((m) => m.status !== 'confirmed'), settings.categories) : [],
-        warnings: warningsFor(request, room),
+        ranks: group ? rankGroup(group.members, ctx.settings.categories) : [],
+        roomDay: roomDay(ctx, request.roomId, request.date),
         alternatives: freeRooms(
+          ctx,
           {
             date: request.date,
             startMin: request.startMin,
             endMin: request.endMin,
-            minCapacity: request.expectedAttendance,
-            preferBuilding: room.building,
+            minSeats: request.expectedAttendance,
+            needs: request.needs,
+            forClubs: organisation.kind === 'club' || organisation.kind === 'society',
             excludeRoomId: room.id,
             excludeRequestId: request.id,
           },
-          rooms,
-          requests,
-          settings.changeoverBufferMin,
-        ).slice(0, 5),
-        schedule: roomDaySchedule(request.roomId, request.date, requests, settings),
-        actions: visibility === 'full' ? availableActions(request, actor, ctx) : [],
-        lookups: {
-          organisations,
-          authorities: settings.authorities,
-          categories: settings.categories,
-          rooms,
-        },
+          room,
+        ).slice(0, 3),
+        actions: visibility === 'full' ? availableActions(ctx, request, actor, now) : [],
+        logs: visibility === 'full' ? logs : logs.filter((l) => !l.internal),
+        offices: ctx.settings.offices,
+        clashOrgs: Object.fromEntries(
+          clashesFor(ctx, id)
+            .filter((c) => c.item.request !== null)
+            .map((c) => [
+              c.item.request?.id ?? '',
+              ctx.organisations.find((o) => o.id === c.item.request?.organisationId)?.name ?? '',
+            ]),
+        ),
+        visibility,
       },
     }
   }
 
-  async getOrganisationStats(actor: Actor): Promise<OrganisationStats[]> {
-    const ctx = await this.loadContext()
-    const { settings, organisations, requests } = ctx
-    const visible = requests.filter((r) => visibilityOf(actor, r, requests, settings) === 'full')
-    return organisations.map((organisation) => {
-      const own = visible.filter((r) => r.organisationId === organisation.id)
-      const uses = new Map<string, number>()
-      for (const r of own) uses.set(r.roomId, (uses.get(r.roomId) ?? 0) + 1)
-      const top = [...uses.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]
-      return {
-        organisation,
-        requests: own.length,
-        confirmed: own.filter((r) => r.status === 'confirmed').length,
-        rejected: own.filter((r) => r.status === 'rejected').length,
-        cancellations: own.filter((r) => r.status === 'cancelled').length,
-        displaced: own.filter((r) => r.status === 'displaced').length,
-        autoApproved: own.filter((r) => r.autoApprovedBy !== null).length,
-        mostUsedRoomId: top ? top[0] : null,
-        lastRequestAt: own.map((r) => r.createdAt).sort().pop() ?? null,
-      }
-    })
-  }
-
-  /** Everything that needs this actor, grouped by organisation and ordered by urgency. */
-  async getWorkQueue(actor: Actor): Promise<{ groups: QueueGroup[]; total: number }> {
-    const ctx = await this.loadContext()
-    const { settings, rooms, organisations, requests } = ctx
-    const today = todayIST(this.clock())
-    const byOrg = new Map<string, QueueGroup>()
-    let total = 0
-    for (const request of requests) {
-      if (!needsMyAction(actor, request)) continue
-      if (visibilityOf(actor, request, requests, settings) !== 'full') continue
-      const organisation = organisations.find((o) => o.id === request.organisationId)
-      const room = rooms.find((r) => r.id === request.roomId)
-      if (!organisation || !room) continue
-      const conflictCount = conflictsFor(request.id, requests, settings).length
-      const warnings = warningsFor(request, room).map((w) => w.code)
-      const category = settings.categories.find((c) => c.id === request.category)
-      const clean = conflictCount === 0 && warnings.every((w) => w === 'short_notice')
-      const actions = availableActions(request, actor, ctx)
-      const approve = actions.find((a) => a.action === 'approve')
-      const row = {
-        request,
-        roomLabel: `${room.building} · ${room.name}`,
-        categoryLabel: category?.label ?? request.category,
-        tier: category?.tier ?? 99,
-        conflictCount,
-        warnings,
-        daysAway: Math.round((Date.parse(`${request.date}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000),
-        canQuickApprove: clean && approve?.enabled === true,
-        approveLabel: approve?.label ?? 'Approve',
-      }
-      const group = byOrg.get(organisation.id) ?? { organisation, rows: [], urgency: 0 }
-      group.rows.push(row)
-      byOrg.set(organisation.id, group)
-      total += 1
-    }
-    const groups = [...byOrg.values()]
-    for (const g of groups) {
-      g.rows.sort((a, b) => a.request.date.localeCompare(b.request.date) || a.request.startMin - b.request.startMin)
-      // Lower is more urgent: soonest event, conflicts pull a group up.
-      const first = g.rows[0]
-      g.urgency = (first?.daysAway ?? 99) - (g.rows.some((r) => r.conflictCount > 0) ? 2 : 0)
-    }
-    groups.sort((a, b) => a.urgency - b.urgency || b.rows.length - a.rows.length || a.organisation.code.localeCompare(b.organisation.code))
-    return { groups, total }
-  }
-
-  async getRoomsBoard(actor: Actor): Promise<{ today: string; items: RoomBoardItem[]; organisations: Organisation[] }> {
-    void actor
-    const ctx = await this.loadContext()
-    const { settings, rooms, organisations, requests } = ctx
-    const nowIso = this.clock()
-    const today = todayIST(nowIso)
-    const local = new Date(Date.parse(nowIso) + IST_OFFSET_MIN * 60_000)
-    const nowMin = local.getUTCHours() * 60 + local.getUTCMinutes()
-    const groups = findConflictGroups(requests, settings)
-
-    const holder = (r: BookingRequest): RoomHolder => {
-      const org = organisations.find((o) => o.id === r.organisationId)
-      return {
-        requestId: r.id,
-        eventName: r.eventName,
-        organisationCode: org?.code ?? '???',
-        organisationColour: org?.colour ?? 'slate',
-        startMin: r.startMin,
-        endMin: r.endMin,
-      }
-    }
-    const items: RoomBoardItem[] = rooms.map((room) => {
-      const todays = requests.filter((r) => r.roomId === room.id && r.date === today)
-      const confirmed = todays.filter((r) => r.status === 'confirmed').sort((a, b) => a.startMin - b.startMin)
-      const booked = confirmed.reduce((sum, r) => sum + (r.endMin - r.startMin), 0)
-      const open = room.openUntilMin - room.openFromMin
-      const current = confirmed.find((r) => r.startMin <= nowMin && nowMin < r.endMin)
-      const upcoming = confirmed.find((r) => r.startMin > nowMin)
-      return {
-        room,
-        now: current ? holder(current) : null,
-        next: upcoming ? holder(upcoming) : null,
-        utilisationPercent: open === 0 ? 0 : Math.round((booked / open) * 100),
-        pendingToday: todays.filter((r) => r.status === 'pending').length,
-        conflictToday: groups.some((g) => g.roomId === room.id && g.date === today && g.isOpen),
-      }
-    })
-    return { today, items, organisations }
-  }
-
-  /** Quick lookup across organisations, requests and rooms for the search box. */
-  async search(actor: Actor, query: string): Promise<SearchHit[]> {
-    const q = query.trim().toLowerCase()
-    if (q.length === 0) return []
-    const ctx = await this.loadContext()
-    const { settings, rooms, organisations, requests } = ctx
-    const hits: SearchHit[] = []
-    for (const o of organisations) {
-      if (o.code.toLowerCase().startsWith(q) || o.name.toLowerCase().includes(q)) {
-        hits.push({ kind: 'organisation', label: o.name, detail: `${o.code} · ${o.authorityId.toUpperCase()}`, href: `/admin/bookings/organisations/${o.code.toLowerCase()}`, code: o.code, colour: o.colour })
-      }
-    }
-    for (const r of rooms) {
-      const squash = (v: string) => v.toLowerCase().replace(/[^a-z0-9]/g, '')
-      if (squash(`${r.building} ${r.name} ${r.floor}`).includes(squash(q)) || squash(`${r.building}${r.name}`).includes(squash(q))) {
-        hits.push({ kind: 'room', label: `${r.building} · ${r.floor} floor · ${r.name}`, detail: `${r.capacity} seats`, href: `/admin/bookings/rooms/${r.id}` })
-      }
-    }
-    for (const request of requests) {
-      if (visibilityOf(actor, request, requests, settings) === 'none') continue
-      const org = organisations.find((o) => o.id === request.organisationId)
-      const haystack = `${request.id} ${request.eventName} ${org?.name ?? ''} ${org?.code ?? ''}`.toLowerCase()
-      if (!haystack.includes(q)) continue
-      hits.push({ kind: 'request', label: request.eventName, detail: `${request.id} · ${org?.code ?? ''} · ${request.date}`, href: `/admin/bookings/requests/${request.id}`, code: org?.code, colour: org?.colour })
-      if (hits.length > 40) break
-    }
-    return hits.slice(0, 12)
-  }
-
-  async getOverview(actor: Actor): Promise<OverviewData> {
-    const ctx = await this.loadContext()
-    const { settings, rooms, organisations, requests } = ctx
-    const nowIso = this.clock()
-    const today = todayIST(nowIso)
-    const nowLocal = new Date(Date.parse(nowIso) + IST_OFFSET_MIN * 60_000)
-    const nowMin = nowLocal.getUTCHours() * 60 + nowLocal.getUTCMinutes()
-
-    const { rows, counts } = await this.listRequests(actor, { tab: 'needs_action' })
-    const conflictGroups = await this.listConflictGroups(actor)
-    const visible = requests.filter((r) => visibilityOf(actor, r, requests, settings) === 'full')
-    const weekEnd = addDays(today, 7)
-    const monthAgo = Date.parse(nowIso) - 30 * 86_400_000
-
-    const usage = (r: BookingRequest): RoomUsageItem => {
-      const room = rooms.find((x) => x.id === r.roomId)
-      return {
-        roomLabel: room ? `${room.building} · ${room.name}` : r.roomId,
-        eventName: r.eventName,
-        startMin: r.startMin,
-        endMin: r.endMin,
-        requestId: r.id,
-      }
-    }
-    const todays = requests.filter((r) => r.status === 'confirmed' && r.date === today)
-    const bookedMin = todays.reduce((sum, r) => sum + (r.endMin - r.startMin), 0)
-    const openMin = rooms.reduce((sum, r) => sum + (r.openUntilMin - r.openFromMin), 0)
-
-    const logs = await this.repo.listLogs()
-    const visibleIds = new Set(visible.map((r) => r.id))
-    const activity: ActivityItem[] = logs
-      .filter((l) => visibleIds.has(l.requestId))
-      .slice(-10)
-      .reverse()
-      .map((l) => {
-        const request = requests.find((r) => r.id === l.requestId)
-        const who =
-          l.actorAuthority === 'system'
-            ? 'System'
-            : l.actorAuthority === 'organisation'
-              ? (organisations.find((o) => o.id === request?.organisationId)?.name ?? 'Organisation')
-              : l.actorAuthority === 'superadmin'
-                ? 'Super admin'
-                : (settings.authorities.find((a) => a.id === l.actorAuthority)?.shortLabel ?? l.actorAuthority)
-        const name = `"${request?.eventName ?? l.requestId}"`
-        let text: string
-        switch (l.action) {
-          case 'submitted':
-            text = `${who} submitted ${name}`
-            break
-          case 'forwarded': {
-            const idx = request?.stages.findIndex((s) => settings.authorities.find((a) => a.id === s)?.shortLabel === l.stageLabel) ?? -1
-            const next = idx >= 0 ? request?.stages[idx + 1] : undefined
-            const nextLabel = settings.authorities.find((a) => a.id === next)?.shortLabel
-            text = `${who} forwarded ${name}${nextLabel ? ` to ${nextLabel}` : ''}`
-            break
-          }
-          case 'escalated':
-            text = `${who} escalated ${name}`
-            break
-          case 'confirmed':
-            text = `${who} confirmed ${name}`
-            break
-          case 'override_confirmed':
-            text = `${who} confirmed ${name} by override`
-            break
-          case 'auto_approved':
-            text = `${name} was auto-approved`
-            break
-          case 'rejected':
-            text = `${who} rejected ${name}`
-            break
-          case 'changes_requested':
-            text = `${who} requested changes to ${name}`
-            break
-          case 'resubmitted':
-            text = `${who} resubmitted ${name}`
-            break
-          case 'cancelled':
-            text = `${who} cancelled ${name}`
-            break
-          case 'displaced':
-            text = `${name} was displaced`
-            break
-          case 'withdrawn':
-            text = `${who} withdrew ${name}`
-            break
-          default:
-            text = `${who} added a remark on ${name}`
-        }
-        return { id: l.id, text, at: l.at, requestId: l.requestId, internal: l.internal }
-      })
-
-    return {
-      today,
-      needsAction: counts.needs_action,
-      openConflicts: conflictGroups.length,
-      confirmedNext7Days: visible.filter((r) => r.status === 'confirmed' && r.date >= today && r.date <= weekEnd).length,
-      rejectedLast30Days: visible.filter((r) => r.status === 'rejected' && Date.parse(r.updatedAt) >= monthAgo).length,
-      needsActionRows: rows.slice(0, 6),
-      conflictGroups: conflictGroups.slice(0, 3),
-      inUseNow: todays.filter((r) => r.startMin <= nowMin && nowMin < r.endMin).map(usage),
-      nextUp: todays
-        .filter((r) => r.startMin > nowMin)
-        .sort((a, b) => a.startMin - b.startMin)
-        .slice(0, 5)
-        .map(usage),
-      utilisationPercent: openMin === 0 ? 0 : Math.round((bookedMin / openMin) * 100),
-      activity,
-    }
-  }
-
-  async getCalendar(actor: Actor, f: CalendarFilters): Promise<CalendarData> {
-    const ctx = await this.loadContext()
-    const { settings, rooms, organisations, requests } = ctx
-    const rangeFrom = f.view === 'day' ? f.date : f.view === 'week' ? startOfWeek(f.date) : startOfMonth(f.date)
-    const rangeTo = f.view === 'day' ? f.date : f.view === 'week' ? addDays(rangeFrom, 6) : endOfMonth(f.date)
-
-    const shownRooms = rooms.filter(
-      (r) =>
-        (!f.building || r.building === f.building) &&
-        (!f.floor || r.floor === f.floor) &&
-        (!f.roomId || r.id === f.roomId),
-    )
-    const roomIds = new Set(shownRooms.map((r) => r.id))
-    const groups = findConflictGroups(requests, settings)
-    const inConflict = new Set<string>()
-    const conflictDates = new Set<string>()
-    for (const g of groups) {
-      for (const m of g.members) inConflict.add(m.id)
-      if (g.isOpen && g.date >= rangeFrom && g.date <= rangeTo) conflictDates.add(g.date)
-    }
-
-    const items: CalendarItem[] = []
-    for (const r of requests) {
-      if (!roomIds.has(r.roomId) || r.date < rangeFrom || r.date > rangeTo) continue
-      if (!['pending', 'changes_requested', 'confirmed'].includes(r.status)) continue
-      if (f.status && r.status !== f.status) continue
-      if (f.organisationId && r.organisationId !== f.organisationId) continue
-      if (f.category && r.category !== f.category) continue
-      items.push({
-        id: r.id,
-        eventName: r.eventName,
-        organisationName: organisations.find((o) => o.id === r.organisationId)?.name ?? r.organisationId,
-        organisationCode: organisations.find((o) => o.id === r.organisationId)?.code ?? '???',
-        organisationColour: organisations.find((o) => o.id === r.organisationId)?.colour ?? 'slate',
-        roomId: r.roomId,
-        date: r.date,
-        startMin: r.startMin,
-        endMin: r.endMin,
-        status: r.status,
-        inConflict: inConflict.has(r.id),
-        canOpen: visibilityOf(actor, r, requests, settings) !== 'none',
-      })
-    }
-    return { rooms: shownRooms, items, rangeFrom, rangeTo, conflictDates: [...conflictDates] }
-  }
-
-  async listConflictGroups(actor: Actor): Promise<ConflictGroupView[]> {
-    const ctx = await this.loadContext()
-    const views: ConflictGroupView[] = []
-    for (const group of findConflictGroups(ctx.requests, ctx.settings)) {
-      if (!group.isOpen) continue
-      const view = this.buildGroupView(actor, group.id, ctx)
+  async listClashes(actor: Actor): Promise<ClashGroupView[]> {
+    const ctx = await this.fresh()
+    const views: ClashGroupView[] = []
+    for (const group of allClashGroups(ctx)) {
+      if (!group.members.some((m) => m.status === 'pending')) continue
+      const view = this.buildClashView(actor, group.id, ctx)
       if (view) views.push(view)
     }
     return views
   }
 
-  async getConflictGroup(actor: Actor, groupId: string): Promise<ServiceResult<ConflictGroupView>> {
-    const ctx = await this.loadContext()
-    const view = this.buildGroupView(actor, groupId, ctx)
-    return view ? { ok: true, data: view } : failure(404, 'This conflict no longer exists.')
+  async getClash(actor: Actor, groupId: string): Promise<ServiceResult<ClashGroupView>> {
+    const ctx = await this.fresh()
+    const view = this.buildClashView(actor, groupId, ctx)
+    return view ? { ok: true, data: view } : failure(404, 'This clash no longer exists.')
   }
 
-  private buildGroupView(actor: Actor, groupId: string, ctx: EngineContext): ConflictGroupView | null {
-    const { settings, rooms, organisations, requests } = ctx
-    const group = findGroupById(groupId, requests, settings)
+  private buildClashView(actor: Actor, groupId: string, ctx: EngineContext): ClashGroupView | null {
+    const group = findClashGroup(ctx, groupId)
     if (!group) return null
-    const visibilities = group.members.map((m) => visibilityOf(actor, m, requests, settings))
-    if (visibilities.every((v) => v === 'none')) return null
-    const room = rooms.find((r) => r.id === group.roomId)
+    const now = this.now()
+    const room = ctx.rooms.find((r) => r.id === group.roomId)
     if (!room) return null
-
-    const ranks = rankGroup(group.members, settings.categories)
-    const members: ConflictMemberView[] = []
+    const visibilities = group.members.map((m) => visibilityOf(actor, m, ctx))
+    if (visibilities.every((v) => v === 'none')) return null
+    const ranks = rankGroup(group.members, ctx.settings.categories)
+    const members: ClashMemberView[] = []
     for (const member of group.members) {
-      const organisation = organisations.find((o) => o.id === member.organisationId)
+      const organisation = ctx.organisations.find((o) => o.id === member.organisationId)
       const rank = ranks.find((r) => r.requestId === member.id)
-      if (!organisation || !rank) continue
-      const visibility = visibilityOf(actor, member, requests, settings)
-      const category = settings.categories.find((c) => c.id === member.category)
-      const stage = member.stages[member.stageIndex]
-      const own = requests.filter((r) => r.organisationId === member.organisationId)
-      const record: OrganisationRecord = {
-        requests: own.length,
-        confirmed: own.filter((r) => r.status === 'confirmed').length,
-        rejected: own.filter((r) => r.status === 'rejected').length,
-        cancelled: own.filter((r) => r.status === 'cancelled').length,
-      }
+      const visibility = visibilityOf(actor, member, ctx)
+      if (!organisation || !rank || visibility === 'none') continue
+      const category = ctx.settings.categories.find((c) => c.id === member.category)
       members.push({
         request: member,
         organisation,
+        standing: orgStanding(ctx, organisation, now),
         categoryLabel: category?.label ?? member.category,
+        tier: category?.tier ?? 99,
         rank,
-        stageLabel:
-          member.status === 'pending'
-            ? (settings.authorities.find((a) => a.id === stage)?.shortLabel ?? '')
-            : member.status === 'confirmed'
-              ? 'Confirmed'
-              : '',
-        record,
+        flags: flagsFor(ctx, member, room, now),
         alternatives: freeRooms(
+          ctx,
           {
             date: member.date,
             startMin: member.startMin,
             endMin: member.endMin,
-            minCapacity: member.expectedAttendance,
-            preferBuilding: room.building,
+            minSeats: member.expectedAttendance,
+            forClubs: organisation.kind === 'club' || organisation.kind === 'society',
             excludeRoomId: room.id,
             excludeRequestId: member.id,
           },
-          rooms,
-          requests,
-          settings.changeoverBufferMin,
-        ).slice(0, 8),
+          room,
+        ).slice(0, 6),
         visibility,
-        actions: visibility === 'full' ? availableActions(member, actor, ctx) : [],
+        actions: visibility === 'full' ? availableActions(ctx, member, actor, now) : [],
       })
     }
-
-    const softRanks = rankGroup(
-      group.members.filter((m) => m.status === 'pending'),
-      settings.categories,
-    )
+    const pending = group.members.filter((m) => m.status === 'pending')
+    const oldest = Math.min(...group.members.map((m) => Date.parse(m.createdAt)))
     return {
       group,
       room,
       members,
-      suggestedWinnerId: softRanks[0]?.requestId ?? null,
-      canResolve: actsForFinalAuthority(actor, settings),
+      blockers: group.blockedBy.map((b) => ({
+        kind: b.kind === 'class' ? 'class' : b.effect === 'held' ? 'held' : 'booked',
+        label: b.block ? `${b.block.courseCode} ${b.block.title}` : (b.request?.eventName ?? b.id),
+        requestId: b.request?.id ?? null,
+        startMin: b.startMin,
+        endMin: b.endMin,
+      })),
+      suggestedWinnerId: rankGroup(pending, ctx.settings.categories)[0]?.requestId ?? null,
+      canResolve: canResolveClashes(actor, ctx),
+      openHours: Math.max(0, Math.round((Date.parse(now) - oldest) / 3_600_000)),
+      offices: ctx.settings.offices,
     }
+  }
+
+  async getOrganisations(actor: Actor): Promise<OrgRow[]> {
+    const ctx = await this.fresh()
+    const now = this.now()
+    void actor
+    return ctx.organisations.map((organisation) => {
+      const standing = orgStanding(ctx, organisation, now)
+      const room = ctx.rooms.find((r) => r.id === standing.mostUsedRoomId)
+      return { organisation, standing, mostUsedRoom: room ? `${room.building} ${room.name}` : 'None' }
+    })
+  }
+
+  /** For the sidebar badges. */
+  async counts(actor: Actor): Promise<{ inbox: number; clashes: number }> {
+    const inbox = await this.getInbox(actor, { page: 1 })
+    const clashes = await this.listClashes(actor)
+    return { inbox: inbox.counts.clash + inbox.counts.look + inbox.counts.clear, clashes: clashes.length }
+  }
+
+  today(): string {
+    return todayIST(this.now())
+  }
+
+  daysFromToday(n: number): string {
+    return addDays(this.today(), n)
   }
 }
 
 /* ---------------- Singleton for the app ---------------- */
 
-const GLOBAL_KEY = '__bookingService__'
+const GLOBAL_KEY = '__bookingServiceV2__'
 type GlobalWithService = typeof globalThis & { [GLOBAL_KEY]?: BookingService }
 
 export function getBookingService(): BookingService {

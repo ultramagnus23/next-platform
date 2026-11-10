@@ -1,253 +1,198 @@
-# Booking Admin Portal: PRD
-> Status: approved (brief) · Area: admin · Owner: Ministry of Technology
-> Demo due Wednesday 11 November 2026. Progress review Monday 9 November 2026.
+# Room Booking Admin Portal: PRD (v2)
+> Status: approved (brief v2) · Area: admin · Owner: Ministry of Technology
+> Demo Wednesday 11 November 2026. v2 replaces the v1 spec. The v1 build is the starting point.
 
 ## 1. Summary
 
-**Problem.** Societies request rooms, chase approvals from their governing office, then go to
-Academic Booking before anything appears in AMS (the university room system). Nothing is
-tracked, conflicts are found late, and decisions are not recorded.
+**Problem.** Clubs request rooms, chase their governing office, then go to Academic Booking before
+anything reaches AMS. At about 100 rooms, 75 clubs and 200 to 300 requests a week, a flat list of
+requests cannot be run by hand.
 
-**Solution.** One platform. This PRD covers the admin side only: SLO, OA, CFE, Academic Booking
-and super admins review, approve, reject, resolve conflicts and see availability. Every decision
-sends an automatic email. The organisation-facing portal is built later by a collaborator.
+**Solution.** One admin portal where the system sorts every request on arrival and people judge only
+the exceptions. Every request sits in a lane (Clash, Needs a look, Clear). Clear requests are
+approved in bulk. A room that cannot be given is replaced by an offer of a free room held for 24
+hours. A clash is one decision on one screen. Every action has a log entry and an email.
 
-This is an approval workflow and resource-allocation system. The value is in the workflow
-engine, conflict handling, availability model and notifications.
+**Scale.** About 151 venues (the real inventory), 90 organisations (75 clubs, 15 other bodies), a two-week timetable and
+about 450 requests in the demo window.
 
 **Success criteria**
-1. The 11-step demo script (section 11) runs end to end with no page errors.
-2. All 23 scenario checks (S1 to S23) pass with `npx tsx src/app/admin/bookings/_server/engine/scenarios.ts`.
-3. Two simultaneous final approvals on overlapping requests: exactly one wins, the other gets 409.
-4. Every status change writes one audit log entry and the right outbox emails.
-5. Swapping the mock repository for Strapi changes files only inside `_server/repo/`.
+1. The 13-step demo script (section 11) runs end to end with no page errors.
+2. All 35 scenario checks (S1 to S35) pass.
+3. Lanes for every pending request and the Rooms day summary compute in under 200 ms on seed data.
+4. Two simultaneous final approvals on overlapping requests: exactly one wins, the other gets 409.
+5. Replacing the in-memory repository with Strapi changes only files in `_server/repo/`.
 
-## 2. Users and access
+## 2. Principles (apply to every screen)
 
-| Who | How they get in | Can do |
-|-----|-----------------|--------|
-| SLO, OA, CFE member | New grant `booking_admin` via role `booking_authority` | See requests whose chain includes their authority. Act on requests at their stage. Forward, escalate, reject, request changes. |
-| Academic Booking (ACAD) member | Same | See all requests. Act at the final stage. Decide conflict groups. Override and cancel confirmed bookings. |
-| Super admin | `SUPERADMIN_EMAILS` (grant added to role) | Everything, at any stage. Only role that edits settings. |
+1. The system sorts, people judge. 2. Never a bare no: offer a room. 3. A clash is one decision.
+4. Explain every flag in one plain sentence that cites the rule. 5. Status names are not room
+effects: each maps to competes, held, booked or none. 6. Classes are the floor. 7. Undo, don't
+confirm: single decisions apply at once with a 10 second undo, confirmations only for bulk and
+override. 8. Keyboard first (J K A O C D /). 9. Rows not cards at volume. 10. Status is never colour
+alone; at most six statuses per screen; text contrast at least 4.5:1. 11. Nothing waits forever:
+48 hour response targets, overdue items first, undecided requests expire at event start.
+12. Everything leaves a trail.
 
-Decisions that bind this design:
-- **Authority is data, not a role (D2).** Which authority a person acts for is looked up per
-  request from `BOOKING_AUTHORITIES`. It is never stored in the session token.
-- Role `booking_authority` sits below `ashoka_admin` and above `organization`. Access:
-  `['platform', 'booking_admin']`. `superadmin` also gets `booking_admin`.
-- `src/app/admin/layout.tsx` admits `booking_admin`. `src/middleware.ts` `ROUTE_ACCESS` gets
-  `/admin/bookings` for `booking_admin`, and `/admin/organisations` plus `/admin/organizations`
-  for `ashoka_admin`, so loosening the layout does not expose existing admin pages.
-- Visibility and action matrix lives in `_server/access.ts`. The client never sends authorities.
-  Actions re-read membership at action time.
-- Demo mode (`BOOKING_DEMO_MODE=true`): cookie `booking_demo_persona` selects `slo_approver`,
-  `oa_approver`, `cfe_approver`, `acad_approver` or `super_admin`. The persona replaces
-  authorities, never the signed-in identity. Ignored when demo mode is off.
+Visual language: existing platform tokens (page `#f7f4f2`, panels `#fffdfb`, crimson `#87281b` as the
+single accent, semantic colours only for state). Nunito headings, Nunito Sans text. Radii 8, 10, 12
+and full pills. No side-stripe borders, gradients, glass or giant KPI tiles.
 
-## 3. Stories and flows
+## 3. Users and access
 
-| Story | Acceptance |
-|-------|-----------|
-| As an authority member, I want a queue of requests waiting on me so that I act on the right ones first. | "Needs my action" is the default tab. Count matches the Overview tile. |
-| As an authority member, I want to approve and forward, request changes or reject with a reason so that the organisation knows what happens next. | Reason is at least 10 characters for reject and request changes. An email is queued. |
-| As an authority member, I want to see competing requests so that I can escalate instead of deciding for another office. | Conflict panel lists competitors, ranks and reasons. Escalate jumps to the final stage. |
-| As Academic Booking, I want to resolve a conflict group in one action so that no one is left half-decided. | Resolve applies all changes or none, under the room-date lock. Summary lists every email first. |
-| As Academic Booking, I want to override a confirmed booking with a reason so that urgent academic needs are met without silent damage. | Displaced booking becomes `displaced`. Its organisation and authority are emailed. |
-| As a super admin, I want to edit tiers, workflows and auto-approval rules so that policy changes need no code change. | Settings save. In-flight requests keep their snapshotted stages. |
+| Who | Gets in by | Can do |
+|-----|-----------|--------|
+| SLO, OA, CFE member | `booking_admin` via role `booking_authority` | See requests whose chain includes their office. Act at their step: approve, offer a room, ask for changes, decline, escalate a clash. |
+| Academic Booking member | Same | See all. Final approval, resolve clashes, override, cancel, direct bookings, edit the timetable. |
+| Super admin | `SUPERADMIN_EMAILS` | Everything, any step. Only role that edits rules. |
 
-**Happy path.** Submit, then each stage in `stages` approves in order. The last approval
-re-checks confirmed bookings inside the room-date lock and sets `confirmed`.
+- The office is data: looked up per request from `BOOKING_OFFICES`, never in the session token.
+  People on two offices pick an **Acting for** office (httpOnly cookie `booking_acting_for`,
+  validated every request).
+- `src/app/admin/layout.tsx` admits `booking_admin`. `src/middleware.ts` pins `/admin/bookings` to
+  `booking_admin`. Sidebar category "Room bookings": Inbox, Clashes, Rooms, Calendar, Organisations,
+  Sent emails, Rules.
+- Self-approval is blocked: an actor whose email is the organisation's contact cannot act on that
+  organisation's requests.
+- Demo mode (`BOOKING_DEMO_MODE=true`): cookie `booking_demo_persona` selects one of
+  `slo_approver | oa_approver | cfe_approver | acad_approver | super_admin`. Ignored otherwise.
 
-**Edge cases.**
-- Stale `version` returns 409. The UI shows "This request changed while you were looking at it. Reloaded with the latest version." and refreshes.
-- Final approval over a confirmed booking returns 409 with the blocking booking. ACAD sees Override and confirm.
-- Back-to-back bookings (18:00 to 20:00 and 20:00 to 21:00) do not conflict when the buffer is 0.
-- A conflicted request is never auto-approved.
+## 4. Decisions D1 to D22 (binding)
 
-## 4. Screens
-
-Wireframe: no (skipped by the brief). Design direction: the existing admin portal look, tokens
-in `.agents/context/design.md`, shadcn components, Nunito fonts. Dense, calm, operational.
-
-All pages: `force-dynamic`, usable at 390 px (tables collapse to cards, panels stack). Demo mode
-shows an amber banner: `Demo mode: data is simulated and resets on restart. No emails are sent.`
-and a "Viewing as" persona select, a "Simulate request" button and a "Reset demo data" item.
-
-| Route | Purpose | Primary action | Notes |
-|-------|---------|----------------|-------|
-| `/admin/bookings` | Overview | Open a request or conflict | 4 KPI tiles linking to filtered lists, needs-action list (top 6), open conflicts (top 3), today across campus, recent activity (10). |
-| `/admin/bookings/requests` | Queue | Open a request | Tabs: Needs my action, With other authorities, Confirmed, Closed, All. Filters in URL params. Empty: `Nothing waiting on you.` |
-| `/admin/bookings/requests/[id]` | Detail and actions | Contextual approve button | Left: header, event card, stepper, conflict panel, room timeline, alternative rooms, history. Right: sticky action panel with reason dialogs and live email preview. |
-| `/admin/bookings/conflicts` | Open groups | Open a group | One card per group, soonest first. |
-| `/admin/bookings/conflicts/[groupId]` | Compare and resolve | Resolve | Overlap timeline, side-by-side columns, priority reasons, resolve flow with summary step. |
-| `/admin/bookings/calendar` | Availability | Open a block | Day (default), week (one room), month views. CSS grid, no calendar library. |
-| `/admin/bookings/organisations` | Per-organisation stats | Open filtered requests | Sortable table. Secondary. |
-| `/admin/bookings/outbox` | Simulated emails | Open email in side sheet | Banner: `Simulated. Nothing has been sent.` |
-| `/admin/bookings/settings` | Policy | Edit (super admin only) | Tabs: categories and priority, workflows, auto-approval, authorities, rooms, general. Read-only for others, with a lock note. |
-
-States: every page has loading skeletons, an empty state and an error state.
+D1 portal at `/admin/bookings`. D2 office is data. D3 chain snapshotted at submission, default
+`[governing office, ACAD]`, templates override by office and category. D4 room effects: pending and
+changes_requested compete, offered holds the offered room 24 hours, confirmed and classes book.
+D5 priority is advisory, from category only, never organisation or office. D6 cross-office clashes
+are decided by ACAD only. D7 offer a room is first-class; accepting counts as approved at the step
+that offered. D8 final approval re-checks under a per-room-date lock plus `version`; stale is 409.
+D9 override is ACAD or super admin with a reason, never over a class. D10 lanes are computed, never
+stored. D11 bulk approve only for Clear, re-validated per item, one undo for the batch. D12 every
+transition writes logs and emails; decline and ask-for-changes need a reason of 10 or more
+characters. D13 emails go through an outbox. D14 auto-approval exists, off by default, only for
+Clear requests. D15 response targets and expiry. D16 organisation standing is shown, not enforced.
+D17 material edits reopen approval. D18 direct bookings for non-club bodies. D19 "confirmed" means
+ready for AMS (simulated). D20 times are date plus minutes in IST, half-open, 15 minute grid. D21 no
+map, recurring bookings or check-in. D22 fork cleanup after the demo (already done on `main`).
 
 ## 5. Data
 
-**Demo.** All data goes through `BookingRepository` (`_server/repo/repository.ts`). Only
-`_server/repo/memory.ts` holds state, on `globalThis` so it survives HMR. Nothing else imports it.
-Seed names and emails are placeholders. The store resets on restart and does not work on
-multi-instance or serverless hosting.
+Types in `types.ts`, zod in `schema.ts` (see brief section 3 for the full model): Office, Room
+(with `bookableByClubs`), Organisation (kind, officeId, weeklyCap), TimetableBlock, BookingRequest
+(status adds `offered` and `expired`; `offer`, `stageEnteredAt`, `previous`, `source`, `needs`),
+ApprovalLog (adds `batchId`, new actions), OutboxEmail (adds `batchId`), WorkflowTemplate,
+AutoApprovalRule, BookingSettings (adds `minNoticeHours`, `offerHoldHours`, `undoSeconds`,
+per-office `responseTargetHours`).
 
-**Strapi collection types for the later swap (M7, not in this build)**
+Derived, never stored: lanes, flags, clash groups, ranks, alternatives, standing, overdue.
 
-| Collection | Purpose |
-|------------|---------|
-| `booking-requests` | `BookingRequest`, including `stages`, `stageIndex`, `version` |
-| `booking-logs` | `ApprovalLog` |
-| `booking-outbox` | `OutboxEmail` |
-| `booking-rooms` | `Room` |
-| `booking-settings` (single type) | `BookingSettings` |
-| `booking-authority-members` | Authority membership, replaces env parsing |
-| `organisations` (existing) | New field `booking_authority` |
+**Strapi collection types for the later swap:** `booking-requests`, `booking-logs`,
+`booking-outbox`, `booking-rooms`, `booking-timetable`, `booking-settings` (single type),
+`booking-office-members`. Existing `organisations` gains `booking_office`, `booking_weekly_cap`,
+`booking_code`, `booking_colour`.
 
-Times: `date: 'YYYY-MM-DD'` plus `startMin` and `endMin` (minutes since midnight, IST). Intervals
-are half-open. Slot granularity 15 minutes. Optional changeover buffer, default 0.
+**Repository.** `BookingRepository` with an in-memory implementation (`_server/repo/memory.ts`) held
+on `globalThis` with `roomId:date` indexes. Single Node process only: it does not work across
+instances or serverless hosting. Seed is deterministic (seeded PRNG), all names are placeholders.
 
-Types are in `types.ts`, zod schemas in `schema.ts`, as specified in the brief section 3.
+## 6. Engines (pure, `now` passed in)
 
-## 6. API contract
+`effects`, `overlap`, `clashes`, `flags`, `lanes`, `priority`, `workflow` (`transition`,
+`availableActions`, `sweep`), `availability`, `auto-approval`, `notifications`, `standing`.
+Flags: over_capacity, short_notice, outside_hours, over_weekly_cap, room_not_for_clubs, poor_record,
+reopened, overdue (sort only). Lane: clash, else look if any flag other than overdue, else clear.
+Actions: approve, offer_room, accept_offer, lapse_offer, escalate, request_changes, reject,
+resubmit, override_confirm, cancel, note, undo. `sweep(now)` runs at the start of every service read:
+lapses offers, expires started events, emits overdue emails once per step.
 
-All under `src/app/api/admin/bookings/`. Each method: `requireAuth(['booking_admin'])`, resolve
-actor, check `access.ts`, validate body with zod. Response: `{ success: true, data } | { success: false, error }`.
+## 7. Volume and performance
 
-| Method and path | Access | Purpose |
-|-----------------|--------|---------|
-| `GET /requests` | booking_admin | List with the Requests page filters |
-| `GET /requests/[id]` | booking_admin, must be allowed to see it | Detail bundle |
-| `POST /requests/[id]/actions` | by action rules | `{ action, version, reason?, alternativeRoomId? }` |
-| `GET /conflicts`, `GET /conflicts/[groupId]` | booking_admin | Groups with ranks |
-| `POST /conflicts/[groupId]/resolve` | ACAD, super admin | Atomic resolve with per-member versions |
-| `GET /availability` | booking_admin | Day schedule or free rooms |
-| `GET /outbox` | booking_admin | Simulated emails |
-| `GET /settings`, `PUT /settings` | PUT super admin only | Settings |
-| `POST /demo/persona`, `/demo/reset`, `/demo/submit`, `/demo/resubmit/[id]` | demo mode only, else 404 | Demo helpers |
+Server-filtered, paginated inbox (50 rows) with server counts per lane. In-memory indexes by
+`roomId:date`. Rooms grid: buildings collapsed except the active one, plain divs with percentage
+positions, no per-cell components. All filters in URL params.
 
-Error codes: 400 validation, 403 not allowed, 404 missing or demo off, 409 stale version or
-blocked by a confirmed booking.
+## 8. API contract
 
-**Locking.** `_server/service.ts` is the only repository caller. Each mutation takes an
-in-memory promise-chain mutex keyed `roomId:date` (resolve takes all keys in sorted order),
-loads, runs the engine, checks versions, saves, appends logs and outbox, releases. The Strapi
-version must do this inside a custom Strapi controller using a database transaction, because
-Strapi's REST API cannot.
+Under `src/app/api/admin/bookings/`, each method gated `requireAuth(['booking_admin'])` then actor
+then `access.ts`: `GET /inbox`, `GET /requests`, `GET /requests/[id]`, `POST /requests/[id]/actions`,
+`POST /bulk/approve`, `POST /undo`, `GET /clashes`, `GET /clashes/[groupId]`,
+`POST /clashes/[groupId]/resolve`, `GET /rooms/day`, `GET /rooms/free`, `POST /direct-bookings`,
+`GET /outbox`, `GET|PUT /settings`, `POST /acting-for`, and demo routes (persona, reset, submit,
+resubmit, accept-offer, advance-clock), 404 unless demo mode. Errors: 400 validation, 403 not
+allowed, 404, 409 stale version or blocked.
 
-## 7. Live data
+Locking: every mutation runs `sweep(now)`, takes the room-date lock (sorted keys for multi-key),
+loads, runs the engine, checks versions, saves, appends logs and outbox. The Strapi version needs a
+custom controller with a database transaction, because Strapi's REST API cannot do this.
 
-None. Load on open. After a mutation the client calls `router.refresh()`. No SSE.
+## 9. Screens
 
-## 8. Caching and cost
+Inbox `/admin/bookings` (split view, lanes, detail pane, bulk approve, undo, keyboard). Clashes
+`/admin/bookings/clashes` and `/[groupId]` (overlap strip, side-by-side, decision panel). Rooms
+`/admin/bookings/rooms` (find bar, day grid, week, month). Calendar agenda. Organisations table
+(standing, no-shows first). Sent emails. Rules (priority, chains, limits, auto-approval, offices,
+rooms and timetable). Detail in the brief, sections 9.1 to 9.7. Every page has loading, empty and
+error states and works at 390 px.
 
-| Dataset | Scope | Cache |
-|---------|-------|-------|
-| All booking pages and routes | Per user, mutable | `force-dynamic`, no server cache tier |
+## 10. Integrations and env
 
-Volume: about 100 requests and bookings in the seed. In-memory, no cost.
+| Key | Purpose | Scope | Example |
+|-----|---------|-------|---------|
+| `BOOKING_OFFICES` | Office membership | Server only | `slo:a@x.in,b@x.in;oa:c@x.in;cfe:d@x.in;acad:e@x.in` |
+| `BOOKING_DEMO_MODE` | Persona switcher, reset, simulation | Server only | `true` |
 
-## 9. Integrations
+Email: outbox page now, `sendMail()` later. AMS: simulated badge. Local sign-in bypass (demo mode
+plus `BYPASS_AUTH`, never in production) exists in `src/middleware.ts`.
 
-| Integration | Demo | Later |
-|-------------|------|-------|
-| Email | Outbox page renders emails. Nothing is sent. | A sender drains the outbox through `src/lib/apis/mail.ts` `sendMail()` |
-| AMS | `AMS: synced (simulated)` badge with timestamp | TBD, method unknown |
+## 11. Demo script (acceptance test)
 
-**New env keys** (added to `.env.example` with empty values)
+1. SLO approver: Inbox shows Clashes, Needs a look and 21 Clear. Overdue first.
+2. Approve all 21, Undo (emails marked undone), approve all again.
+3. "Crisis committee" is over capacity. Offer AC-01 G04. Sent emails shows the 24 hour offer.
+4. "Intro to ML Workshop": clash names Open Mic Night. Press A: forwarded, next row selected.
+5. OA approver: Open Mic Night in Clashes, workshop read-only. Escalate.
+6. Academic Booking: open the AC-02 201 clash, suggested winner is the workshop with a tier reason.
+7. Keep the workshop, AC-03 104 preselected for Open Mic Night, Confirm decision.
+8. Workshop Confirmed with AMS badge. Open Mic Night Offered. Emails to both.
+9. Accept offer: Open Mic Night confirmed in AC-03 104.
+10. Rooms, Thu, 6 to 8 PM, 40 seats, free only: both rooms gone; with the switch off, crimson blocks.
+11. Override case: final approval disabled "Already booked by …", Override offered. Class case:
+    disabled "A class is booked here at this time", no override.
+12. Super admin enables the rule, simulates a 9:30 PM meeting for 20: confirmed by `system`.
+13. Advance clock 1 day: Crisis committee offer lapses, an overdue request shows "Waiting 3 days".
 
-| Name | Purpose | Scope | Example |
-|------|---------|-------|---------|
-| `BOOKING_AUTHORITIES` | Authority membership | Server only | `slo:a@ashoka.edu.in,b@ashoka.edu.in;oa:c@ashoka.edu.in;cfe:d@ashoka.edu.in;acad:e@ashoka.edu.in` |
-| `BOOKING_DEMO_MODE` | Enables persona switcher, reset and simulated submission | Server only | `true` |
+## 12. Milestones
 
-`BOOKING_AUTHORITIES` is parsed once at module top in `_server/authorities.ts`. Malformed input
-fails closed: log with `platform.error`, treat as empty.
+- [x] M0: PRD and plan · acceptance: plan confirmed
+- [x] M1: Types, schemas, engines, repository, full-scale seed, service, actor, access, scenarios · S1 to S35 pass, typecheck clean
+- [x] M2: Auth wiring, persona and acting-for, Inbox with approve, offer, changes, decline, undo, bulk, keyboard · demo steps 1 to 5
+- [x] M3: Clash list and group page with resolve · steps 6 to 9
+- [x] M4: Rooms day grid, find bar, free-only · step 10
+- [x] M5: Sent emails, override and class-blocked cases, simulate request, advance clock · steps 8, 11, 13
+- [x] M6: Rules, Organisations table · step 12
+- [ ] M7: Rooms week and month, Calendar agenda, direct booking, mobile pass, audit
+- [ ] M8: Strapi repository, real mail, timetable import (not in this build)
 
-## 10. Launch
+Wednesday cut: M0 to M4 polished, M5 if time. After the last milestone reached, write `README.md` and stop.
 
-Sidebar category "Bookings" (Overview, Requests, Conflicts, Calendar, Organisations, Outbox,
-Settings), `requiresAccess: 'booking_admin'`. New sidebar role `booking_authority` with
-`seesUnrestricted: false`. The existing "Organisations" entry is restricted to `ashoka_admin`
-and `superadmin`. Unrelated admin entries are hidden from booking-only users, not deleted (D16).
-Tour, banner and what's-new: n/a for the demo.
+## 13. Non-goals
 
-## 11. Milestones
+Organisation-facing portal beyond simulated submit, resubmit and accept; campus map; recurring
+bookings; check-in and real no-show tracking; real AMS; real email; Strapi; analytics charts.
 
-- [x] M0: PRD and implementation plan · acceptance: plan confirmed
-- [x] M1: Types, schemas, engines, repository, seed, service, actor, access, scenario checks · acceptance: S1 to S23 pass, typecheck clean
-- [x] M2: Auth wiring, persona switcher, Requests list, Request detail with all actions and dialogs · acceptance: demo steps 1 to 4
-- [x] M3: Conflicts list and group page with resolve flow · acceptance: demo steps 5 to 8
-- [x] M4: Calendar day, week, month · acceptance: demo step 9
-- [x] M5: Overview, Outbox, simulated submission and resubmission · acceptance: demo steps 1 and 10, Overview numbers match linked lists
-- [x] M6: Settings, Organisations page, mobile pass, states, `/web-design-guidelines` audit · acceptance: demo step 11, full script clean, `npm run build` passes
-- [ ] M7 (after the demo, not started): Strapi repository and real mail sender
+## 14. Open policy questions (all built as configuration)
 
-After M6, write `README.md` in this folder and stop.
+1. Approval chain per office and whether steps can run in parallel. 2. Office members and what "OA"
+stands for. 3. Priority order of categories, and whether it differs by space type. 4. Which
+bookings may auto-approve. 5. Opening hours and equipment per venue, and which venues are classes-only. The venue list and capacities are now the real campus inventory (about 150 venues across Admin Block, AC-01 to AC-06, Dining Block, Sports Block, Outfield and the Open Amphitheatre).
+6. How to get the timetable (AMS export or CSV) and how often it changes. 7. AMS integration method.
+8. Email infrastructure and sender. 9. Weekly caps, minimum notice, add/drop period rule. 10. Whether
+organisations can cancel or modify confirmed bookings, the cutoff, and what a material change is.
+11. What happens to displaced bookings beyond the email. 12. Whether no-shows are tracked and the
+consequences.
 
-**Demo script (acceptance test)**
-1. Persona SLO approver. Overview lists "Intro to ML Workshop" under Needs your action, with a conflict badge.
-2. Open it. Conflict panel shows "Open Mic Night" (OA, cultural, tier 5) and ranks the workshop first with reasons.
-3. Approve and forward to Academic Booking. Stepper moves. Outbox has a forwarded email to Academic Booking and an update to CS Society.
-4. Switch to OA approver. OA cannot reject the workshop (control absent, explanation shown). OA escalates Open Mic Night.
-5. Switch to Academic Booking. Open conflicts shows the AC-02 201 group. Comparison suggests the workshop.
-6. Resolve: confirm the workshop. Open Mic Night gets "Request changes, suggest another room" with a free 60+ seat room in AC-03. Summary lists the changes and two emails.
-7. Workshop is Confirmed with `AMS: synced (simulated)`. Open Mic Night is Changes requested.
-8. Outbox shows the final approval email to CS Society and its chain, and the changes-requested email to Cultural Society with reason and alternative room.
-9. Calendar day view shows the workshop as a confirmed block in AC-02 201.
-10. Demo: simulate resubmission of Open Mic Night with the new room. It restarts at OA with no conflict.
-11. Super admin enables the auto-approval rule, simulates a 9:30 PM meeting for 20 people in a free room. It is confirmed at once, logged as `system` with the rule, and an `auto_approved` email is in the Outbox.
+## 15. Build notes (10 November 2026)
 
-Also seeded: a request that overlaps a confirmed booking. Final approval is disabled with
-`Blocked by a confirmed booking`. Academic Booking sees `Override and confirm`.
-
-## 12. Non-goals
-
-Organisation-facing portal (beyond the simulated submission), 2D or 3D campus map, recurring
-bookings, real AMS integration, real email sending, Strapi collections, analytics charts beyond
-the Organisations table, deleting unrelated tools from the fork.
-
-## 13. Risks and open questions
-
-**Risks**
-- In-memory store: single process only. Mitigation: documented, repository interface isolates it.
-- Loosening the admin layout could expose existing admin pages. Mitigation: explicit middleware entries for `/admin/organisations` and `/admin/organizations`.
-- Simultaneous approvals. Mitigation: room-date lock plus `version` check (D8).
-
-**Open policy questions (all implemented as configuration, never hardcoded)**
-1. Exact approval chain for each of SLO, OA, CFE (workflow templates).
-2. Who sits on Academic Booking and the other authorities (`BOOKING_AUTHORITIES`).
-3. Official priority order of categories (category tiers).
-4. Which bookings may be auto-approved (auto-approval rules).
-5. Official list of buildings, floors, rooms, capacities and hours (rooms seed, later Strapi).
-6. Whether IT can provide 2D floor plans (future map).
-7. AMS integration method (D13 placeholder).
-8. Email infrastructure and sender address (outbox sender, `mail.ts`).
-9. Whether organisations can cancel or modify confirmed bookings, and the cutoff.
-10. What happens to a displaced booking beyond notification (re-queue automatically or not).
-
-**Decisions D1 to D16** from the brief are binding. Summary: portal at `/admin/bookings`;
-authority is data; approval chain is a snapshot; default chain is governing authority then ACAD;
-slots lock only on final approval; priority is advisory and from category only; ACAD decides
-cross-authority conflicts; final approval is guarded by lock and version; override is ACAD or
-super admin with a reason; every transition writes audit and outbox; outbox is rendered, not
-sent; auto-approval exists but is off; "confirmed" means ready for AMS (simulated); half-open
-time intervals in IST; no map or recurring bookings; fork cleanup happens after the demo.
-
-## 14. Admin experience v2 (added 10 Nov 2026)
-
-Why: at hundreds of bookings a day, a flat list does not let an admin see who is booking what.
-
-| Change | Detail |
-|--------|--------|
-| Organisation monikers | Every organisation has a 2 to 4 letter `code` and a fixed `colour` (for example CSS, indigo). The code appears on every booking row, calendar block, conflict card, search result and room card. New fields on the Strapi `organisations` collection: `booking_code`, `booking_colour`. |
-| Home is a work queue | `/admin/bookings` shows only what needs the signed-in admin, grouped by organisation and ordered by urgency (soonest event, conflicts first). Clean requests have an inline Forward button. A role banner states which office the admin acts for and what they can do. |
-| Global search | One box (press `/`) finds organisations by code or name, rooms by building and number, and bookings by id or event. `GET /api/admin/bookings/search?q=`. |
-| Organisation pages | `/admin/bookings/organisations` is a searchable directory. `/admin/bookings/organisations/[code]` shows figures, what is waiting, upcoming and history. |
-| Rooms board | `/admin/bookings/rooms` groups rooms by building and floor with free or in use now, who holds it, what is next and how full it is today. `/admin/bookings/rooms/[roomId]` shows seven days of timelines. |
-| Requests | Grouped by date, quick filters (Today, Next 7 days, Conflicts), 50 per page. |
-| Sidebar | Work (Today's work, Conflicts), Browse (All requests, Organisations, Rooms, Calendar), Records (Outbox, Settings). |
-
-The repository was also reduced to this portal only: sign-in, the admin shell and the booking code remain.
+- Venues: `_server/repo/fixtures.ts` holds the campus inventory. A venue's floor comes from the first digit of its room number. Opening hours (8 AM to 11 PM) and equipment are placeholders. Laboratories are classes-only. Timetable classes are generated only for classrooms and laboratories.
+- Demo script rooms: the clash is AC-01 LR-106 (100 seats). AC-03 LR-003 is the only free fit for Open Mic Night. Crisis committee is 70 people in AC-01 LR-103 (50 seats), and AC-01 LR-207 is held free to offer. The class-blocked case is AC-04 LR-304. The override case is AC-03 LR-005.
+- Not built yet (M7): Rooms week and month views, the Calendar agenda, mobile pass and the design audit. Direct booking is built (click an empty stretch of a room row as Academic Booking).
+- Scenario checks: 37 pass (S1 to S35, plus S2b and S26b).

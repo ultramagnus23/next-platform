@@ -1,35 +1,36 @@
 /**
- * Shared types for the booking admin portal.
+ * Shared types for the booking admin portal (v2).
  * Pages, routes, engines and the repository all import from here.
  */
 
-export type AuthorityId = 'slo' | 'oa' | 'cfe' | 'acad'
+export type OfficeId = 'slo' | 'oa' | 'cfe' | 'acad'
 
-export interface Authority {
-  id: AuthorityId
+export interface Office {
+  id: OfficeId
   label: string
   shortLabel: string
-  /** Where "new request" notifications go. */
+  /** Where "new request" and overdue notices go. */
   inboxEmails: string[]
-  /** Who can act for this authority. */
   memberEmails: string[]
+  /** True only for Academic Booking. */
   isFinal: boolean
+  responseTargetHours: number
 }
 
 export type CategoryId =
   | 'academic'
-  | 'workshop'
   | 'seminar'
+  | 'workshop'
   | 'competition'
-  | 'cultural'
   | 'club_event'
+  | 'cultural'
   | 'meeting'
   | 'other'
 
 export interface EventCategory {
   id: CategoryId
   label: string
-  /** 1 = highest priority. Configurable and reorderable. */
+  /** 1 is highest priority. Advice only. */
   tier: number
   description: string
 }
@@ -37,37 +38,80 @@ export interface EventCategory {
 export interface Room {
   id: string
   building: string
+  /** Empty for outdoor venues and anything without a floor number. */
   floor: string
   name: string
+  /** Venue category from the campus inventory, such as 'Classroom – Large'. */
+  category: string
   capacity: number
   features: string[]
   openFromMin: number
   openUntilMin: number
+  bookableByClubs: boolean
 }
 
-/** Fixed palette so a code always shows in the same colour. */
-export type OrgColour =
-  | 'red' | 'orange' | 'amber' | 'lime' | 'emerald' | 'teal'
-  | 'sky' | 'indigo' | 'violet' | 'fuchsia' | 'rose' | 'slate'
+export type OrgKind = 'club' | 'society' | 'ministry' | 'department' | 'office' | 'other'
+
+/** Mocked semester record. Real tracking needs check-in, which is out of scope. */
+export interface OrgRecord {
+  bookings: number
+  used: number
+  noShows: number
+  lateCancels: number
+}
 
 export interface Organisation {
   id: string
   name: string
-  /** Short moniker shown on every booking, filter and calendar block. 2 to 4 capitals. */
-  code: string
-  colour: OrgColour
-  authorityId: AuthorityId
+  kind: OrgKind
+  officeId: OfficeId
   contactEmail: string
+  /** Null means no cap. */
+  weeklyCap: number | null
+  record: OrgRecord
+}
+
+/** One class in the academic timetable. The floor everything else sits on. */
+export interface TimetableBlock {
+  id: string
+  roomId: string
+  courseCode: string
+  title: string
+  date: string
+  startMin: number
+  endMin: number
 }
 
 export type RequestStatus =
   | 'pending'
   | 'changes_requested'
+  | 'offered'
   | 'confirmed'
   | 'rejected'
   | 'withdrawn'
   | 'cancelled'
   | 'displaced'
+  | 'expired'
+
+/** What a status does to a room. Availability reads this, never the label. */
+export type RoomEffect = 'competes' | 'held' | 'booked' | 'none'
+
+export interface RoomOffer {
+  roomId: string
+  offeredBy: OfficeId | 'superadmin'
+  offeredAt: string
+  holdUntil: string
+  /** The step the request resumes at once the offer is accepted. */
+  stageIndexOnAccept: number
+}
+
+export interface SlotSnapshot {
+  roomId: string
+  date: string
+  startMin: number
+  endMin: number
+  expectedAttendance: number
+}
 
 export interface BookingRequest {
   id: string
@@ -77,22 +121,24 @@ export interface BookingRequest {
   category: CategoryId
   description: string
   roomId: string
-  /** 'YYYY-MM-DD', campus local time (IST). */
   date: string
-  /** Minutes since midnight. Intervals are half-open. */
   startMin: number
   endMin: number
   expectedAttendance: number
+  needs: string[]
   status: RequestStatus
-  /** Snapshot of the approval chain taken at submission. */
-  stages: AuthorityId[]
+  source: 'request' | 'direct'
+  stages: OfficeId[]
   stageIndex: number
+  stageEnteredAt: string
+  offer: RoomOffer | null
   escalated: boolean
-  /** Id of the auto-approval rule that acted on this request. */
   autoApprovedBy: string | null
-  /** ISO. Simulated AMS sync time. */
   amsSyncedAt: string | null
-  /** Optimistic concurrency counter. */
+  /** Set when a change after approval reopened the request. */
+  previous: SlotSnapshot | null
+  /** Step for which an overdue email was already sent. */
+  overdueNotified: number | null
   version: number
   createdAt: string
   updatedAt: string
@@ -100,46 +146,57 @@ export interface BookingRequest {
 
 export type LogAction =
   | 'submitted'
+  | 'auto_checked'
   | 'forwarded'
   | 'escalated'
   | 'confirmed'
+  | 'offered'
+  | 'offer_accepted'
+  | 'offer_lapsed'
   | 'rejected'
   | 'changes_requested'
   | 'resubmitted'
+  | 'reopened'
   | 'withdrawn'
   | 'cancelled'
   | 'displaced'
   | 'override_confirmed'
   | 'auto_approved'
-  | 'remark'
+  | 'expired'
+  | 'undone'
+  | 'note'
+  | 'direct_booked'
 
-export type LogActorAuthority = AuthorityId | 'superadmin' | 'system' | 'organisation'
+export type LogRole = OfficeId | 'superadmin' | 'system' | 'organisation'
 
 export interface ApprovalLog {
   id: string
   requestId: string
   at: string
   actorEmail: string
-  actorAuthority: LogActorAuthority
+  actorRole: LogRole
   action: LogAction
   fromStatus: RequestStatus | null
   toStatus: RequestStatus
   stageLabel: string | null
   reason: string | null
-  /** True for remarks. Never emailed. */
   internal: boolean
+  batchId: string | null
 }
 
 export type NotificationTrigger =
   | 'request_submitted'
   | 'request_forwarded'
-  | 'request_approved_final'
+  | 'request_confirmed'
   | 'request_rejected'
   | 'changes_requested'
-  | 'conflict_detected'
+  | 'room_offered'
+  | 'offer_lapsed'
+  | 'clash_detected'
   | 'booking_displaced'
-  | 'booking_modified'
+  | 'request_expired'
   | 'auto_approved'
+  | 'step_overdue'
 
 export interface OutboxEmail {
   id: string
@@ -151,16 +208,19 @@ export interface OutboxEmail {
   subject: string
   text: string
   status: 'simulated' | 'queued' | 'sent' | 'failed'
+  /** Set when the email was cancelled, for example by an undo. */
+  failReason: string | null
+  batchId: string | null
 }
 
-export type EmailDraft = Omit<OutboxEmail, 'id' | 'at' | 'status'>
+export type EmailDraft = Omit<OutboxEmail, 'id' | 'at' | 'status' | 'failReason' | 'batchId'>
 
 export interface WorkflowTemplate {
   id: string
   name: string
-  match: { authorityId?: AuthorityId; categories?: CategoryId[] }
-  /** Must end with a final authority. */
-  stages: AuthorityId[]
+  match: { officeId?: OfficeId; categories?: CategoryId[] }
+  /** Must end with a final office. */
+  stages: OfficeId[]
 }
 
 export interface AutoApprovalRule {
@@ -173,7 +233,7 @@ export interface AutoApprovalRule {
     endAtOrBeforeMin?: number
     maxAttendance?: number
     buildings?: string[]
-    minLeadTimeHours?: number
+    minNoticeHours?: number
     maxPerOrgPerWeek?: number
   }
   effect: 'confirm' | 'skip_to_final_stage'
@@ -181,58 +241,63 @@ export interface AutoApprovalRule {
 
 export interface BookingSettings {
   categories: EventCategory[]
-  authorities: Authority[]
+  offices: Office[]
   workflows: WorkflowTemplate[]
   autoApproval: AutoApprovalRule[]
   changeoverBufferMin: number
+  minNoticeHours: number
+  offerHoldHours: number
+  undoSeconds: number
+  defaultWeeklyCap: number
 }
 
 /* ------------------------------------------------------------------ */
 /* Actors and actions                                                  */
 /* ------------------------------------------------------------------ */
 
-export type PersonaId =
-  | 'slo_approver'
-  | 'oa_approver'
-  | 'cfe_approver'
-  | 'acad_approver'
-  | 'super_admin'
+export type PersonaId = 'slo_approver' | 'oa_approver' | 'cfe_approver' | 'acad_approver' | 'super_admin'
 
 export interface Actor {
   email: string
-  authorities: AuthorityId[]
+  offices: OfficeId[]
+  /** The office this person is acting for right now. */
+  actingFor: OfficeId
   isSuperAdmin: boolean
-  /** ACAD member or super admin. */
+  /** Academic Booking member or super admin. */
   canOverride: boolean
   /** Super admin only. */
-  canEditSettings: boolean
+  canEditRules: boolean
   demoPersona: PersonaId | null
 }
 
 export type ActionId =
   | 'approve'
+  | 'offer_room'
+  | 'accept_offer'
   | 'escalate'
-  | 'reject'
   | 'request_changes'
+  | 'reject'
   | 'resubmit'
   | 'override_confirm'
   | 'cancel'
-  | 'remark'
+  | 'note'
 
 export interface SlotChange {
   roomId?: string
   date?: string
   startMin?: number
   endMin?: number
+  expectedAttendance?: number
 }
 
 export interface ActionInput {
   action: ActionId
-  /** Required for every action except `remark`. */
+  /** Required for every action except `note`. */
   version?: number
-  /** Reason, or the remark text. */
+  /** Reason, or the note text. */
   reason?: string
-  alternativeRoomId?: string | null
+  /** Target room for `offer_room`. */
+  roomId?: string
   /** Only for `resubmit`. */
   changes?: SlotChange
 }
@@ -240,32 +305,30 @@ export interface ActionInput {
 export interface ActionAvailability {
   action: ActionId
   label: string
-  /** False means the control is not shown at all. */
   visible: boolean
   enabled: boolean
   disabledReason: string | null
 }
 
-export interface EngineContext {
-  settings: BookingSettings
-  rooms: Room[]
-  organisations: Organisation[]
-  /** Every request, including the one being changed. */
-  requests: BookingRequest[]
-  newId: (kind: 'request' | 'log' | 'email') => string
+export type BlockerKind = 'class' | 'booked' | 'held'
+
+export interface Blocker {
+  kind: BlockerKind
+  label: string
+  requestId: string | null
+  startMin: number
+  endMin: number
 }
 
 export interface TransitionError {
   error: string
   code: 400 | 403 | 409
-  /** Present on a 409 caused by confirmed bookings. */
-  blocking?: BookingRequest[]
+  blockers?: Blocker[]
 }
 
 export interface TransitionSuccess {
-  request: BookingRequest
-  /** Other requests changed by the same transition (displaced bookings). */
-  others: BookingRequest[]
+  /** Every request the transition changed, the target first. */
+  requests: BookingRequest[]
   logs: ApprovalLog[]
   emails: OutboxEmail[]
 }
@@ -273,11 +336,20 @@ export interface TransitionSuccess {
 export type TransitionResult = TransitionSuccess | TransitionError
 
 export interface TransitionOptions {
-  /** Set by the conflict resolve flow. Lets the final authority decide any member. */
+  /** Set by the clash resolve flow. Lets the final office decide any member. */
   resolveGroup?: boolean
 }
 
-/** What a new request looks like before the system fills in the rest. */
+export interface EngineContext {
+  settings: BookingSettings
+  rooms: Room[]
+  organisations: Organisation[]
+  timetable: readonly TimetableBlock[]
+  /** Every request, including the one being changed. */
+  requests: BookingRequest[]
+  newId: (kind: 'request' | 'log' | 'email') => string
+}
+
 export interface RequestDraft {
   organisationId: string
   submittedBy: string
@@ -289,6 +361,7 @@ export interface RequestDraft {
   startMin: number
   endMin: number
   expectedAttendance: number
+  needs?: string[]
 }
 
 export interface SubmitSuccess {
@@ -301,25 +374,57 @@ export interface SubmitSuccess {
 /* Derived data                                                        */
 /* ------------------------------------------------------------------ */
 
-export interface ConflictItem {
-  kind: 'competing_request' | 'confirmed_booking'
-  request: BookingRequest
-}
+export type ItemEffect = 'competes' | 'held' | 'booked'
 
-export interface ConflictGroup {
+/** Anything that occupies a room for a time: a request, a hold or a class. */
+export interface OccupancyItem {
+  kind: 'request' | 'class'
   id: string
   roomId: string
   date: string
   startMin: number
   endMin: number
-  /** Start and end of the part where two or more members overlap. */
-  overlapStartMin: number
-  overlapEndMin: number
-  members: BookingRequest[]
-  hasConfirmed: boolean
-  /** True when at least one member is pending. */
-  isOpen: boolean
+  effect: ItemEffect
+  request: BookingRequest | null
+  block: TimetableBlock | null
 }
+
+export interface ClashGroup {
+  id: string
+  roomId: string
+  date: string
+  startMin: number
+  endMin: number
+  /** Competing requests, soonest submitted first. */
+  members: BookingRequest[]
+  /** Booked requests, held offers and classes in the same overlap. */
+  blockedBy: OccupancyItem[]
+}
+
+export interface ClashItem {
+  kind: 'competing_request' | 'booked' | 'held' | 'class'
+  item: OccupancyItem
+}
+
+export type FlagKind =
+  | 'over_capacity'
+  | 'short_notice'
+  | 'outside_hours'
+  | 'over_weekly_cap'
+  | 'room_not_for_clubs'
+  | 'poor_record'
+  | 'reopened'
+  | 'overdue'
+
+export interface Flag {
+  kind: FlagKind
+  /** Short chip text, such as "20 more people than seats". */
+  title: string
+  /** One sentence that cites the rule. */
+  body: string
+}
+
+export type Lane = 'clash' | 'look' | 'clear'
 
 export interface PriorityRank {
   requestId: string
@@ -328,119 +433,44 @@ export interface PriorityRank {
   reasons: string[]
 }
 
-export type WarningCode = 'over_capacity' | 'outside_room_hours' | 'short_notice'
-
-export interface RequestWarning {
-  code: WarningCode
-  message: string
-}
-
-export interface TimelineBlock {
-  requestId: string
-  eventName: string
-  organisationId: string
-  status: RequestStatus
-  startMin: number
-  endMin: number
-  inConflict: boolean
-}
-
 export interface FreeRoomQuery {
   date: string
   startMin: number
   endMin: number
-  minCapacity: number
-  preferBuilding?: string
+  minSeats: number
+  needs?: string[]
+  building?: string
+  floor?: string
+  /** True when the booker is a club, so classes-only rooms are left out. */
+  forClubs?: boolean
   excludeRoomId?: string
   excludeRequestId?: string
 }
 
-export type Visibility = 'full' | 'summary' | 'none'
-
-/* ------------------------------------------------------------------ */
-/* Service-level shapes                                                */
-/* ------------------------------------------------------------------ */
-
-export type RequestTab = 'needs_action' | 'others' | 'confirmed' | 'closed' | 'all'
-
-export interface RequestFilters {
-  tab: RequestTab
-  dateFrom?: string
-  dateTo?: string
-  organisationId?: string
-  building?: string
-  roomId?: string
-  category?: CategoryId
-  status?: RequestStatus
-  stage?: AuthorityId
-  conflictsOnly?: boolean
-  /** 1-based. Used by the Requests page only. */
-  page?: number
-}
-
-export interface RequestRow {
-  request: BookingRequest
-  organisation: Organisation
-  organisationName: string
-  authorityId: AuthorityId
-  roomLabel: string
-  building: string
-  categoryLabel: string
-  tier: number
-  stageLabel: string
-  conflictCount: number
-  needsMyAction: boolean
-}
-
-export interface RequestDetail {
-  request: BookingRequest
-  visibility: Visibility
-  organisation: Organisation
+export interface FreeRoom {
   room: Room
-  categoryLabel: string
-  logs: ApprovalLog[]
-  conflicts: ConflictItem[]
-  groupId: string | null
-  ranks: PriorityRank[]
-  warnings: RequestWarning[]
-  alternatives: Room[]
-  schedule: TimelineBlock[]
-  actions: ActionAvailability[]
-  /** Reference data the detail page needs to name things. */
-  lookups: {
-    organisations: Organisation[]
-    authorities: Authority[]
-    categories: EventCategory[]
-    rooms: Room[]
-  }
+  /** Other requests waiting for this room at this time. */
+  competing: number
 }
 
-export type ServiceResult<T> =
-  | { ok: true; data: T }
-  | { ok: false; code: 400 | 403 | 404 | 409; error: string; blocking?: BookingRequest[] }
+export type TimelineKind = 'class' | 'booked' | 'competes' | 'held'
 
-export interface ResolveMemberDecision {
+export interface TimelineBlock {
   id: string
-  action: 'reject' | 'request_changes'
-  reason: string
-  alternativeRoomId?: string | null
+  kind: TimelineKind
+  label: string
+  startMin: number
+  endMin: number
+  /** Set for requests. Classes have none. */
+  requestId: string | null
+  inClash: boolean
 }
 
-export interface ResolveInput {
-  winnerId: string
-  versions: Record<string, number>
-  others: ResolveMemberDecision[]
-}
-
-export interface ResolveOutcome {
-  requests: BookingRequest[]
-  logs: ApprovalLog[]
-  emails: OutboxEmail[]
-}
-
-export interface OrganisationStats {
-  organisation: Organisation
-  requests: number
+export interface OrgStanding {
+  organisationId: string
+  weekBookings: number
+  weeklyCap: number | null
+  semester: OrgRecord
   confirmed: number
   rejected: number
   cancellations: number
@@ -451,174 +481,170 @@ export interface OrganisationStats {
 }
 
 /* ------------------------------------------------------------------ */
-/* Conflict views                                                      */
+/* Service-level shapes                                                */
 /* ------------------------------------------------------------------ */
 
-export interface OrganisationRecord {
-  requests: number
-  confirmed: number
-  rejected: number
-  cancelled: number
+export type ServiceResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; code: 400 | 403 | 404 | 409; error: string; blockers?: Blocker[] }
+
+export interface InboxFilters {
+  lane?: Lane
+  q?: string
+  office?: OfficeId
+  building?: string
+  category?: CategoryId
+  organisationId?: string
+  page?: number
 }
 
-export interface ConflictMemberView {
+export interface InboxRow {
+  request: BookingRequest
+  organisationName: string
+  kind: OrgKind
+  categoryLabel: string
+  tier: number
+  roomLabel: string
+  lane: Lane
+  flags: Flag[]
+  overdueDays: number
+  /** Short chip text for the list: Clash, Over capacity, Waiting 3 days. */
+  chip: string
+}
+
+export interface InboxData {
+  rows: InboxRow[]
+  counts: Record<Lane, number>
+  /** Requests the actor already passed on, still waiting elsewhere. */
+  elsewhere: number
+  page: number
+  pageSize: number
+  total: number
+  summary: string
+}
+
+export interface RequestDetail {
   request: BookingRequest
   organisation: Organisation
+  standing: OrgStanding
+  room: Room
   categoryLabel: string
+  tier: number
+  lane: Lane
+  flags: Flag[]
+  clashes: ClashItem[]
+  groupId: string | null
+  ranks: PriorityRank[]
+  roomDay: TimelineBlock[]
+  alternatives: FreeRoom[]
+  actions: ActionAvailability[]
+  logs: ApprovalLog[]
+  offices: Office[]
+  /** Organisation name for every request that appears in a clash, by request id. */
+  clashOrgs: Record<string, string>
+  visibility: 'full' | 'summary'
+}
+
+export interface BatchSnapshot {
+  id: string
+  actorEmail: string
+  at: string
+  kind: 'single' | 'bulk_approve' | 'resolve'
+  before: BookingRequest[]
+  /** Version of each request right after the batch, to spot later changes. */
+  afterVersions: Record<string, number>
+  undone: boolean
+}
+
+export interface ResolveDecision {
+  id: string
+  action: 'offer_room' | 'reject' | 'request_changes'
+  reason: string
+  roomId?: string
+}
+
+export interface ResolveInput {
+  winnerId: string
+  versions: Record<string, number>
+  others: ResolveDecision[]
+}
+
+export interface MutationOutcome {
+  requests: BookingRequest[]
+  logs: ApprovalLog[]
+  emails: OutboxEmail[]
+  batchId: string
+}
+
+export interface BulkResult {
+  approved: string[]
+  skipped: Array<{ id: string; why: string }>
+  batchId: string | null
+}
+
+export interface RoomDayRow {
+  room: Room
+  blocks: TimelineBlock[]
+  freeInWindow: boolean
+  competingInWindow: number
+}
+
+export interface RoomsDayData {
+  date: string
+  rows: RoomDayRow[]
+  total: number
+  freeCount: number
+  clashCount: number
+}
+
+export interface RoomsDayQuery {
+  date: string
+  from?: number
+  to?: number
+  minSeats?: number
+  needs?: string[]
+  building?: string
+  freeOnly?: boolean
+}
+
+/* ------------------------------------------------------------------ */
+/* Clash views                                                         */
+/* ------------------------------------------------------------------ */
+
+export interface ClashMemberView {
+  request: BookingRequest
+  organisation: Organisation
+  standing: OrgStanding
+  categoryLabel: string
+  tier: number
   rank: PriorityRank
-  stageLabel: string
-  record: OrganisationRecord
-  /** Alternative rooms free at this member's time with enough seats. */
-  alternatives: Room[]
-  visibility: Visibility
+  flags: Flag[]
+  /** Free rooms that seat this member's crowd at the same time. */
+  alternatives: FreeRoom[]
+  visibility: 'full' | 'summary'
   actions: ActionAvailability[]
 }
 
-export interface ConflictGroupView {
-  group: ConflictGroup
+export interface ClashGroupView {
+  group: ClashGroup
   room: Room
-  members: ConflictMemberView[]
-  /** Top ranked pending member. Advice only. */
+  members: ClashMemberView[]
+  blockers: Blocker[]
+  /** Top ranked member. Advice only. */
   suggestedWinnerId: string | null
   canResolve: boolean
+  /** Hours since the oldest member was submitted. */
+  openHours: number
+  offices: Office[]
 }
 
-export interface ActionOutcome {
-  request: BookingRequest
-  logs: ApprovalLog[]
-  emails: OutboxEmail[]
-}
-
-/* ------------------------------------------------------------------ */
-/* Calendar                                                            */
-/* ------------------------------------------------------------------ */
-
-export type CalendarView = 'day' | 'week' | 'month'
-
-export interface CalendarFilters {
-  view: CalendarView
-  date: string
-  building?: string
-  floor?: string
-  roomId?: string
-  organisationId?: string
-  category?: CategoryId
-  status?: RequestStatus
-}
-
-export interface CalendarItem {
-  id: string
-  eventName: string
-  organisationName: string
-  organisationCode: string
-  organisationColour: OrgColour
-  roomId: string
-  date: string
-  startMin: number
-  endMin: number
-  status: RequestStatus
-  inConflict: boolean
-  /** False when the viewer may not open the request page. */
-  canOpen: boolean
-}
-
-export interface CalendarData {
-  rooms: Room[]
-  items: CalendarItem[]
-  rangeFrom: string
-  rangeTo: string
-  /** Dates in range that hold an open conflict. */
-  conflictDates: string[]
-}
-
-/* ------------------------------------------------------------------ */
-/* Overview                                                            */
-/* ------------------------------------------------------------------ */
-
-export interface ActivityItem {
-  id: string
-  text: string
-  at: string
-  requestId: string
-  internal: boolean
-}
-
-export interface RoomUsageItem {
-  roomLabel: string
-  eventName: string
-  startMin: number
-  endMin: number
-  requestId: string
-}
-
-export interface OverviewData {
-  today: string
-  needsAction: number
-  openConflicts: number
-  confirmedNext7Days: number
-  rejectedLast30Days: number
-  needsActionRows: RequestRow[]
-  conflictGroups: ConflictGroupView[]
-  inUseNow: RoomUsageItem[]
-  nextUp: RoomUsageItem[]
-  utilisationPercent: number
-  activity: ActivityItem[]
-}
-
-/* ------------------------------------------------------------------ */
-/* Work queue and search                                               */
-/* ------------------------------------------------------------------ */
-
-export interface QueueRow {
-  request: BookingRequest
-  roomLabel: string
-  categoryLabel: string
-  tier: number
-  conflictCount: number
-  warnings: WarningCode[]
-  /** Whole days from today to the event. Negative means past. */
-  daysAway: number
-  /** True when nothing needs a second look: no conflict, no capacity or hours problem. */
-  canQuickApprove: boolean
-  approveLabel: string
-}
-
-export interface QueueGroup {
+export interface OrgRow {
   organisation: Organisation
-  rows: QueueRow[]
-  urgency: number
+  standing: OrgStanding
+  mostUsedRoom: string
 }
 
-export interface SearchHit {
-  kind: 'organisation' | 'room' | 'request'
-  label: string
-  detail: string
-  href: string
-  code?: string
-  colour?: OrgColour
-}
-
-/* ------------------------------------------------------------------ */
-/* Rooms board                                                         */
-/* ------------------------------------------------------------------ */
-
-export interface RoomHolder {
-  requestId: string
-  eventName: string
-  organisationCode: string
-  organisationColour: OrgColour
-  startMin: number
-  endMin: number
-}
-
-export interface RoomBoardItem {
-  room: Room
-  /** Confirmed booking in progress right now. */
-  now: RoomHolder | null
-  /** Next confirmed booking later today. */
-  next: RoomHolder | null
-  /** Share of the room's open hours that are confirmed today. */
-  utilisationPercent: number
-  pendingToday: number
-  conflictToday: boolean
+export interface ClockState {
+  now: string
+  offsetDays: number
 }

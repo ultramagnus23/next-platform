@@ -9,20 +9,22 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import type { NotificationTrigger, OutboxEmail } from '../types'
 import { formatTimestamp } from '../utils'
-import { FlagBadge } from './badges'
 
 const ALL = 'all'
 
 export const TRIGGER_LABELS: Record<NotificationTrigger, string> = {
   request_submitted: 'Submitted',
   request_forwarded: 'Forwarded',
-  request_approved_final: 'Final approval',
-  request_rejected: 'Rejected',
-  changes_requested: 'Changes requested',
-  conflict_detected: 'Conflict detected',
-  booking_displaced: 'Booking displaced',
-  booking_modified: 'Booking cancelled',
+  request_confirmed: 'Confirmed',
+  request_rejected: 'Declined or cancelled',
+  changes_requested: 'Changes needed',
+  room_offered: 'Room offered',
+  offer_lapsed: 'Offer ended',
+  clash_detected: 'Clash',
+  booking_displaced: 'Booking replaced',
+  request_expired: 'Expired',
   auto_approved: 'Auto-approved',
+  step_overdue: 'Overdue',
 }
 
 interface OutboxViewProps {
@@ -97,6 +99,7 @@ export function OutboxView({ emails, trigger, requestId }: OutboxViewProps) {
                   <TableHead>To</TableHead>
                   <TableHead>Subject</TableHead>
                   <TableHead>Request</TableHead>
+                  <TableHead>Status</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -104,7 +107,7 @@ export function OutboxView({ emails, trigger, requestId }: OutboxViewProps) {
                   <TableRow key={email.id} className="cursor-pointer" onClick={() => setOpen(email)}>
                     <TableCell className="whitespace-nowrap text-xs">{formatTimestamp(email.at)}</TableCell>
                     <TableCell>
-                      <FlagBadge>{TRIGGER_LABELS[email.trigger]}</FlagBadge>
+                      <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs">{TRIGGER_LABELS[email.trigger]}</span>
                     </TableCell>
                     <TableCell className="max-w-56 truncate text-xs">{email.to.join(', ')}</TableCell>
                     <TableCell className="min-w-64">
@@ -121,6 +124,7 @@ export function OutboxView({ emails, trigger, requestId }: OutboxViewProps) {
                         {email.requestId}
                       </Link>
                     </TableCell>
+                    <TableCell className="text-xs">{email.status === 'failed' ? email.failReason ?? 'Cancelled' : 'Simulated'}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -134,7 +138,7 @@ export function OutboxView({ emails, trigger, requestId }: OutboxViewProps) {
                   onClick={() => setOpen(email)}
                   className="block w-full rounded-lg border border-border bg-card p-3 text-left hover:bg-accent/40"
                 >
-                  <FlagBadge>{TRIGGER_LABELS[email.trigger]}</FlagBadge>
+                  <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs">{TRIGGER_LABELS[email.trigger]}</span>
                   <p className="mt-1 text-sm font-medium">{email.subject}</p>
                   <p className="text-xs text-muted-foreground">
                     {formatTimestamp(email.at)} · To {email.to.join(', ')}

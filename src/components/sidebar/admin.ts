@@ -2,7 +2,6 @@ import {
   Building2,
   CalendarDays,
   DoorOpen,
-  ClipboardList,
   GitCompareArrows,
   LayoutDashboard,
   Mail,
@@ -35,29 +34,16 @@ export const adminSidebar: SidebarInterface = {
   roles,
   categories: [
     {
-      id: "work",
-      title: "Work",
+      id: "room-bookings",
+      title: "Room bookings",
       items: [
-        { title: "Today's work", icon: LayoutDashboard, href: "/bookings", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
-        { title: "Conflicts", icon: GitCompareArrows, href: "/bookings/conflicts", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
-      ],
-    },
-    {
-      id: "browse",
-      title: "Browse",
-      items: [
-        { title: "All requests", icon: ClipboardList, href: "/bookings/requests", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
-        { title: "Organisations", icon: Building2, href: "/bookings/organisations", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
+        { title: "Inbox", icon: LayoutDashboard, href: "/bookings", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
+        { title: "Clashes", icon: GitCompareArrows, href: "/bookings/clashes", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
         { title: "Rooms", icon: DoorOpen, href: "/bookings/rooms", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
         { title: "Calendar", icon: CalendarDays, href: "/bookings/calendar", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
-      ],
-    },
-    {
-      id: "records",
-      title: "Records",
-      items: [
-        { title: "Outbox", icon: Mail, href: "/bookings/outbox", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
-        { title: "Settings", icon: Settings, href: "/bookings/settings", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
+        { title: "Organisations", icon: Building2, href: "/bookings/organisations", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
+        { title: "Sent emails", icon: Mail, href: "/bookings/outbox", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
+        { title: "Rules", icon: Settings, href: "/bookings/settings", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
       ],
     },
   ],

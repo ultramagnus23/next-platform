@@ -2,9 +2,8 @@ import type { BookingRequest, EventCategory, PriorityRank } from '../../types'
 import { humanDuration } from '../../utils'
 
 /**
- * Advisory ranking for a conflict group.
- * Reads the event category and submission time only. It never looks at the
- * organisation or its authority (decision D6).
+ * Advisory ranking for a clash. Reads event category and submission time only.
+ * It never looks at the organisation or its office (decision D5).
  */
 
 const UNKNOWN_TIER = 99
@@ -28,20 +27,12 @@ function compare(a: Ranked, b: Ranked): number {
 }
 
 function reasonsAgainst(self: Ranked, other: Ranked): string[] {
-  const reasons: string[] = []
-  if (self.tier < other.tier) {
-    reasons.push(`${self.label} (tier ${self.tier}) ranks above ${other.label} (tier ${other.tier})`)
-  } else if (self.tier > other.tier) {
-    reasons.push(`${self.label} (tier ${self.tier}) ranks below ${other.label} (tier ${other.tier})`)
-  } else {
-    reasons.push(`${self.label} and ${other.label} are in the same tier (${self.tier})`)
-    const diff = Date.parse(self.request.createdAt) - Date.parse(other.request.createdAt)
-    if (diff !== 0) {
-      reasons.push(`Submitted ${humanDuration(diff)} ${diff < 0 ? 'earlier' : 'later'}`)
-    } else {
-      reasons.push('Submitted at the same time')
-    }
+  if (self.tier !== other.tier) {
+    return [`${self.label} is tier ${self.tier}, ${other.label.toLowerCase()} is tier ${other.tier}`]
   }
+  const diff = Date.parse(self.request.createdAt) - Date.parse(other.request.createdAt)
+  const reasons = [`Both are tier ${self.tier}`]
+  reasons.push(diff === 0 ? 'Submitted at the same time' : `Submitted ${humanDuration(diff)} ${diff < 0 ? 'earlier' : 'later'}`)
   return reasons
 }
 
@@ -53,7 +44,8 @@ export function rankGroup(members: BookingRequest[], categories: EventCategory[]
     if (index === 0) {
       for (const other of ranked.slice(1)) reasons = reasons.concat(reasonsAgainst(entry, other))
     } else if (top) {
-      reasons = reasonsAgainst(entry, top)
+      // A lower-ranked request is compared with the winner, reversed so it reads naturally.
+      reasons = reasonsAgainst(top, entry)
     }
     return { requestId: entry.request.id, rank: index + 1, tier: entry.tier, reasons }
   })

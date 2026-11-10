@@ -98,9 +98,9 @@ export function SettingsView({ initial, rooms, canEdit, demo }: SettingsViewProp
             <TabsTrigger value="categories">Categories and priority</TabsTrigger>
             <TabsTrigger value="workflows">Approval workflows</TabsTrigger>
             <TabsTrigger value="auto">Auto-approval</TabsTrigger>
-            <TabsTrigger value="authorities">Authorities</TabsTrigger>
-            <TabsTrigger value="rooms">Rooms</TabsTrigger>
-            <TabsTrigger value="general">General</TabsTrigger>
+            <TabsTrigger value="offices">Offices</TabsTrigger>
+            <TabsTrigger value="rooms">Rooms and timetable</TabsTrigger>
+            <TabsTrigger value="general">Limits</TabsTrigger>
           </TabsList>
         </div>
 
@@ -110,7 +110,7 @@ export function SettingsView({ initial, rooms, canEdit, demo }: SettingsViewProp
         <TabsContent value="workflows" className="pt-3">
           <WorkflowsTab
             workflows={settings.workflows}
-            authorities={settings.authorities}
+            offices={settings.offices}
             categories={settings.categories}
             disabled={disabled}
             onChange={(workflows) => change({ workflows })}
@@ -125,14 +125,14 @@ export function SettingsView({ initial, rooms, canEdit, demo }: SettingsViewProp
             onChange={(autoApproval) => change({ autoApproval })}
           />
         </TabsContent>
-        <TabsContent value="authorities" className="grid gap-3 pt-3">
+        <TabsContent value="offices" className="grid gap-3 pt-3">
           <p className="text-sm text-muted-foreground">
             {demo
-              ? 'Demo values. Real members come from the BOOKING_AUTHORITIES setting on the server.'
-              : 'Members come from the BOOKING_AUTHORITIES setting on the server.'}
+              ? 'Demo values. Real members come from the BOOKING_OFFICES setting on the server.'
+              : 'Members come from the BOOKING_OFFICES setting on the server.'}
           </p>
           <ul className="grid gap-2 md:grid-cols-2">
-            {settings.authorities.map((a) => (
+            {settings.offices.map((a) => (
               <li key={a.id} className="rounded-md border border-border bg-card p-3 text-sm">
                 <p className="font-medium">
                   {a.label} {a.isFinal && <span className="text-xs text-muted-foreground">(final authority)</span>}
@@ -144,12 +144,12 @@ export function SettingsView({ initial, rooms, canEdit, demo }: SettingsViewProp
           </ul>
         </TabsContent>
         <TabsContent value="rooms" className="grid gap-3 pt-3">
-          <p className="text-sm text-muted-foreground">Placeholder rooms. Replace with the official list from IT.</p>
+          <p className="text-sm text-muted-foreground">The venue list is the campus inventory. Opening hours are placeholders until IT confirms them.</p>
           <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {rooms.map((r) => (
               <li key={r.id} className="rounded-md border border-border bg-card p-2.5 text-sm">
                 <p className="font-medium">
-                  {r.building} · {r.floor} floor · {r.name}
+                  {r.building}{r.floor ? `, ${r.floor} floor` : ""}, {r.name} ({r.category})
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {r.capacity} seats · open {formatMinutes(r.openFromMin)} to {formatMinutes(r.openUntilMin)}
@@ -160,21 +160,50 @@ export function SettingsView({ initial, rooms, canEdit, demo }: SettingsViewProp
           </ul>
         </TabsContent>
         <TabsContent value="general" className="pt-3">
-          <div className="grid max-w-xs gap-1.5">
-            <Label htmlFor="buffer">Changeover buffer (minutes)</Label>
-            <Input
-              id="buffer"
-              type="number"
-              min={0}
-              max={120}
-              step={5}
-              disabled={disabled}
-              value={settings.changeoverBufferMin}
-              onChange={(e) => change({ changeoverBufferMin: Math.min(120, Math.max(0, Number(e.target.value) || 0)) })}
-            />
-            <p className="text-xs text-muted-foreground">
-              Gap required between two bookings in the same room. 0 allows back-to-back bookings.
-            </p>
+          <div className="grid max-w-2xl gap-4 sm:grid-cols-2">
+            {([
+              ['buffer', 'Changeover buffer (minutes)', 'changeoverBufferMin', 0, 120, 'Gap required between two bookings in the same room. 0 allows back-to-back bookings.'],
+              ['notice', 'Minimum notice (hours)', 'minNoticeHours', 0, 720, 'Requests that start sooner get a short notice flag and need a look.'],
+              ['cap', 'Weekly limit per club (default)', 'defaultWeeklyCap', 1, 50, 'A club at this many bookings in a week gets a flag. Individual clubs can have their own limit.'],
+              ['hold', 'Offer hold (hours)', 'offerHoldHours', 1, 168, 'How long an offered room is held for a club before it is released.'],
+              ['undo', 'Undo window (seconds)', 'undoSeconds', 0, 120, 'How long an approver can undo a decision.'],
+            ] as const).map(([id, label, key, min, max, help]) => (
+              <div key={id} className="grid gap-1.5">
+                <Label htmlFor={id}>{label}</Label>
+                <Input
+                  id={id}
+                  type="number"
+                  min={min}
+                  max={max}
+                  disabled={disabled}
+                  value={settings[key]}
+                  onChange={(e) => change({ [key]: Math.min(max, Math.max(min, Number(e.target.value) || min)) } as Partial<BookingSettings>)}
+                />
+                <p className="text-xs text-muted-foreground">{help}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-6 grid max-w-2xl gap-3">
+            <h3>Response target per office (hours)</h3>
+            <p className="text-xs text-muted-foreground">After this long at a step, a request is marked overdue, floats to the top and the office gets an email.</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {settings.offices.map((o) => (
+                <div key={o.id} className="grid gap-1.5">
+                  <Label htmlFor={`target-${o.id}`}>{o.shortLabel}</Label>
+                  <Input
+                    id={`target-${o.id}`}
+                    type="number"
+                    min={1}
+                    max={720}
+                    disabled={disabled}
+                    value={o.responseTargetHours}
+                    onChange={(e) =>
+                      change({ offices: settings.offices.map((x) => (x.id === o.id ? { ...x, responseTargetHours: Math.min(720, Math.max(1, Number(e.target.value) || 1)) } : x)) })
+                    }
+                  />
+                </div>
+              ))}
+            </div>
           </div>
         </TabsContent>
       </Tabs>
