@@ -169,7 +169,7 @@ plus `BYPASS_AUTH`, never in production) exists in `src/middleware.ts`.
 - [x] M4: Rooms day grid, find bar, free-only · step 10
 - [x] M5: Sent emails, override and class-blocked cases, simulate request, advance clock · steps 8, 11, 13
 - [x] M6: Rules, Organisations table · step 12
-- [ ] M7: Rooms week and month, Calendar agenda, direct booking, mobile pass, audit
+- [x] M7: Rooms week and month, Calendar agenda, direct booking, mobile pass, audit
 - [ ] M8: Strapi repository, real mail, timetable import (not in this build)
 
 Wednesday cut: M0 to M4 polished, M5 if time. After the last milestone reached, write `README.md` and stop.
@@ -194,5 +194,5 @@ consequences.
 
 - Venues: `_server/repo/fixtures.ts` holds the campus inventory. A venue's floor comes from the first digit of its room number. Opening hours (8 AM to 11 PM) and equipment are placeholders. Laboratories are classes-only. Timetable classes are generated only for classrooms and laboratories.
 - Demo script rooms: the clash is AC-01 LR-106 (100 seats). AC-03 LR-003 is the only free fit for Open Mic Night. Crisis committee is 70 people in AC-01 LR-103 (50 seats), and AC-01 LR-207 is held free to offer. The class-blocked case is AC-04 LR-304. The override case is AC-03 LR-005.
-- Not built yet (M7): Rooms week and month views, the Calendar agenda, mobile pass and the design audit. Direct booking is built (click an empty stretch of a room row as Academic Booking).
+- M7 is done: Rooms week and month views, the Calendar agenda, direct booking (click an empty stretch of a room row as Academic Booking), section tabs with live counts, and a mobile pass (no horizontal page scroll at 375 px).
 - Scenario checks: 37 pass (S1 to S35, plus S2b and S26b).

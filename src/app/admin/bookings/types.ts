@@ -648,3 +648,29 @@ export interface ClockState {
   now: string
   offsetDays: number
 }
+
+/* ------------------------------------------------------------------ */
+/* Week, month and agenda                                              */
+/* ------------------------------------------------------------------ */
+
+export interface MonthDay {
+  date: string
+  confirmed: number
+  waiting: number
+  clashes: number
+}
+
+export interface AgendaFilters {
+  q?: string
+  category?: CategoryId
+  building?: string
+  status?: RequestStatus
+  days?: number
+}
+
+export interface AgendaRow {
+  request: BookingRequest
+  organisationName: string
+  roomLabel: string
+  categoryLabel: string
+}

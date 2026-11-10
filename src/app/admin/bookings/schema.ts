@@ -153,3 +153,10 @@ export const settingsSchema = z
       }
     })
   })
+
+export const agendaFiltersSchema = z.object({
+  q: z.string().max(80).optional(),
+  category: categoryIdSchema.optional(),
+  building: z.string().min(1).optional(),
+  status: z.enum(['pending', 'changes_requested', 'offered', 'confirmed']).optional(),
+})

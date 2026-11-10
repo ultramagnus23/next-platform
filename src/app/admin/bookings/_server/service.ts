@@ -1,6 +1,8 @@
 import type {
   Actor,
   ActionInput,
+  AgendaFilters,
+  AgendaRow,
   ApprovalLog,
   BatchSnapshot,
   Blocker,
@@ -17,6 +19,7 @@ import type {
   InboxFilters,
   InboxRow,
   Lane,
+  MonthDay,
   MutationOutcome,
   Organisation,
   OrgRow,
@@ -29,9 +32,10 @@ import type {
   RoomsDayQuery,
   ServiceResult,
   TransitionError,
+  TimelineBlock,
   TransitionSuccess,
 } from '../types'
-import { addDays, todayIST } from '../utils'
+import { addDays, endOfMonth, startOfMonth, startOfWeek, todayIST } from '../utils'
 import { canResolveClashes, visibilityOf, waitingOnMe } from './access'
 import { freeRooms, roomDay, roomsDay } from './engine/availability'
 import { chipFor, flagsFor, laneFor, orgStanding, overdueHours } from './engine/flags'
@@ -627,6 +631,65 @@ export class BookingService {
     const inbox = await this.getInbox(actor, { page: 1 })
     const clashes = await this.listClashes(actor)
     return { inbox: inbox.counts.clash + inbox.counts.look + inbox.counts.clear, clashes: clashes.length }
+  }
+
+  /** Seven days of one room, Monday first. */
+  async getRoomWeek(roomId: string, anchorDate: string): Promise<Array<{ date: string; blocks: TimelineBlock[] }>> {
+    const ctx = await this.fresh()
+    const monday = startOfWeek(anchorDate)
+    return Array.from({ length: 7 }, (_, i) => {
+      const date = addDays(monday, i)
+      return { date, blocks: roomDay(ctx, roomId, date) }
+    })
+  }
+
+  /** Counts per day for a month grid. */
+  async getMonth(anchorDate: string, building?: string): Promise<MonthDay[]> {
+    const ctx = await this.fresh()
+    const from = startOfMonth(anchorDate)
+    const to = endOfMonth(anchorDate)
+    const inBuilding = (roomId: string) => !building || ctx.rooms.find((r) => r.id === roomId)?.building === building
+    const days = new Map<string, MonthDay>()
+    for (let d = from; d <= to; d = addDays(d, 1)) days.set(d, { date: d, confirmed: 0, waiting: 0, clashes: 0 })
+    for (const r of ctx.requests) {
+      const day = days.get(r.date)
+      if (!day || !inBuilding(r.roomId)) continue
+      if (r.status === 'confirmed') day.confirmed += 1
+      else if (r.status === 'pending' || r.status === 'changes_requested' || r.status === 'offered') day.waiting += 1
+    }
+    for (const g of allClashGroups(ctx)) {
+      const day = days.get(g.date)
+      if (day && inBuilding(g.roomId) && g.members.some((m) => m.status === 'pending')) day.clashes += 1
+    }
+    return [...days.values()]
+  }
+
+  /** A day-by-day list of events in the next couple of weeks. */
+  async getAgenda(actor: Actor, f: AgendaFilters): Promise<AgendaRow[]> {
+    const ctx = await this.fresh()
+    const from = todayIST(this.now())
+    const to = addDays(from, f.days ?? 14)
+    const q = f.q?.trim().toLowerCase() ?? ''
+    const rows: AgendaRow[] = []
+    for (const request of ctx.requests) {
+      if (!['pending', 'changes_requested', 'offered', 'confirmed'].includes(request.status)) continue
+      if (request.date < from || request.date > to) continue
+      if (f.status && request.status !== f.status) continue
+      if (f.category && request.category !== f.category) continue
+      if (visibilityOf(actor, request, ctx) === 'none') continue
+      const org = ctx.organisations.find((o) => o.id === request.organisationId)
+      const room = ctx.rooms.find((r) => r.id === request.roomId)
+      if (!org || !room) continue
+      if (f.building && room.building !== f.building) continue
+      if (q && !`${request.eventName} ${org.name} ${room.name} ${request.id}`.toLowerCase().includes(q)) continue
+      rows.push({
+        request,
+        organisationName: org.name,
+        roomLabel: `${room.building} ${room.name}`,
+        categoryLabel: ctx.settings.categories.find((c) => c.id === request.category)?.label ?? request.category,
+      })
+    }
+    return rows.sort((a, b) => a.request.date.localeCompare(b.request.date) || a.request.startMin - b.request.startMin).slice(0, 400)
   }
 
   today(): string {

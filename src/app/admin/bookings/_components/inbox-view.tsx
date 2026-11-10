@@ -246,7 +246,11 @@ export function InboxView({ data, detail, selectedId, lane, q, demo, officeName,
       )}
       {data.elsewhere > 0 && (
         <p className="text-sm text-muted-foreground">
-          {data.elsewhere} more request{data.elsewhere === 1 ? '' : 's'} you approved {data.elsewhere === 1 ? 'is' : 'are'} waiting on {nextOffice}.
+          {data.elsewhere} more request{data.elsewhere === 1 ? '' : 's'} you approved {data.elsewhere === 1 ? 'is' : 'are'} waiting on {nextOffice}.{' '}
+          <a className="underline" href="/admin/bookings/calendar?status=pending">
+            See them
+          </a>
+          .
         </p>
       )}
     </div>
