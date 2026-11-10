@@ -39,13 +39,15 @@ export default async function AdminLayout({
     redirect("/unauthorized"); // or "/login"
   }
 
-  const role = session?.user?.role;
-  const access = session?.user?.access ?? [];
+  // The local demo has no session, so the sidebar would hide every item. Show it as a super admin.
+  const devBypass = bypassAuth && !session?.user && process.env.NODE_ENV !== 'production' && process.env.BOOKING_DEMO_MODE === 'true';
+  const role = devBypass ? 'superadmin' : session?.user?.role;
+  const access = devBypass ? ['booking_admin'] : (session?.user?.access ?? []);
 
   return (
     <div className={`${nunito.variable} ${nunitoSans.variable} antialiased`}>
       <TooltipProvider>
-          <SidebarProvider defaultOpen={false}>
+          <SidebarProvider defaultOpen>
             <div className="flex min-h-screen w-full overflow-x-hidden">
               <AppSidebar interfaceId="admin" role={role} access={access} />
               <div className="flex flex-1 flex-col min-w-0 h-screen overflow-y-auto">
