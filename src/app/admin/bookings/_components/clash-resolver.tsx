@@ -195,7 +195,7 @@ export function ClashResolver({ view, groupId }: { view: ClashGroupView; groupId
                 </div>
               </dl>
               <p className="text-xs text-muted-foreground">
-                This semester: {m.standing.semester.bookings} bookings, {m.standing.semester.used} used, {m.standing.semester.noShows} no-shows, {m.standing.semester.lateCancels} cancelled late.
+                This semester: {m.standing.semester.bookings} {m.standing.semester.bookings === 1 ? 'booking' : 'bookings'}, {m.standing.semester.used} used, {m.standing.semester.noShows} {m.standing.semester.noShows === 1 ? 'no-show' : 'no-shows'}, {m.standing.semester.lateCancels} cancelled late.
               </p>
               <p className="text-sm">{m.rank.reasons.join('. ')}{m.rank.reasons.length ? '.' : ''}</p>
               {view.canResolve && r.status === 'pending' && (

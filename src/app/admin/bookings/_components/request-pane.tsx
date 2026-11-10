@@ -288,8 +288,8 @@ export function RequestPane({ detail, demo, onDone }: RequestPaneProps) {
         {detail.lane === 'clear' && detail.flags.length === 0 && <Callout tone="green" title="Nothing to check" />}
         <p className="text-xs text-muted-foreground">
           {organisation.name}: {detail.standing.weekBookings}
-          {detail.standing.weeklyCap ? ` of ${detail.standing.weeklyCap}` : ''} bookings this week. This semester: {detail.standing.semester.bookings} bookings,{' '}
-          {detail.standing.semester.used} used, {detail.standing.semester.noShows} no-shows, {detail.standing.semester.lateCancels} late cancellations.
+          {detail.standing.weeklyCap ? ` of ${detail.standing.weeklyCap}` : ''} bookings this week. This semester: {detail.standing.semester.bookings} {detail.standing.semester.bookings === 1 ? 'booking' : 'bookings'},{' '}
+          {detail.standing.semester.used} used, {detail.standing.semester.noShows} {detail.standing.semester.noShows === 1 ? 'no-show' : 'no-shows'}, {detail.standing.semester.lateCancels} late cancellations.
         </p>
       </section>
 
