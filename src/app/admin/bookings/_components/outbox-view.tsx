@@ -25,6 +25,8 @@ export const TRIGGER_LABELS: Record<NotificationTrigger, string> = {
   request_expired: 'Expired',
   auto_approved: 'Auto-approved',
   step_overdue: 'Overdue',
+  step_escalated: 'Escalated, no decision',
+  weekly_digest: 'Weekly summary',
 }
 
 interface OutboxViewProps {

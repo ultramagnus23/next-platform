@@ -8,9 +8,11 @@ Every request is sorted on arrival into a lane: Clash, Needs a look or Clear. Ap
 offer a free room instead of saying no, and resolve a clash in one decision. Every action is logged, emails are queued in an outbox and
 single decisions can be undone for 10 seconds.
 
-Screens: Inbox, Clashes, Rooms (day grid with find bar, week and month views), Calendar (agenda), Organisations, Sent emails, Rules. A request opened from the grid has its own page.
+Screens: Inbox (group by type, club, or room and date), Clashes, Insights, Rooms (day grid with find bar, week and month views), Calendar (agenda), Organisations, Sent emails, Rules. A request opened from the grid has its own page.
 
-Not built: the organisation-facing portal, real email, real AMS, Strapi.
+Also built: overdue reminders, escalation to the backup approver at twice the response target, a weekly summary email per office, and a stale-action message that names who already acted.
+
+Not built: the organisation-facing portal, check-in and no-show release, real email, real AMS, Strapi.
 
 ## Run the demo
 

@@ -1,4 +1,5 @@
 import {
+  BarChart3,
   Building2,
   CalendarDays,
   DoorOpen,
@@ -42,6 +43,7 @@ export const adminSidebar: SidebarInterface = {
         { title: "Rooms", icon: DoorOpen, href: "/bookings/rooms", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
         { title: "Calendar", icon: CalendarDays, href: "/bookings/calendar", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
         { title: "Organisations", icon: Building2, href: "/bookings/organisations", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
+        { title: "Insights", icon: BarChart3, href: "/bookings/insights", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
         { title: "Sent emails", icon: Mail, href: "/bookings/outbox", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
         { title: "Rules", icon: Settings, href: "/bookings/settings", roles: BOOKING_ROLES, requiresAccess: "booking_admin" },
       ],

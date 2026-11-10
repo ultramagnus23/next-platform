@@ -139,6 +139,8 @@ export interface BookingRequest {
   previous: SlotSnapshot | null
   /** Step for which an overdue email was already sent. */
   overdueNotified: number | null
+  /** Step for which the backup approver was already told. */
+  escalationNotified: number | null
   version: number
   createdAt: string
   updatedAt: string
@@ -197,6 +199,8 @@ export type NotificationTrigger =
   | 'request_expired'
   | 'auto_approved'
   | 'step_overdue'
+  | 'step_escalated'
+  | 'weekly_digest'
 
 export interface OutboxEmail {
   id: string
@@ -684,4 +688,18 @@ export interface AgendaRow {
   organisationName: string
   roomLabel: string
   categoryLabel: string
+}
+
+/* ------------------------------------------------------------------ */
+/* Insights                                                            */
+/* ------------------------------------------------------------------ */
+
+export interface InsightsData {
+  buildings: Array<{ building: string; rooms: number; utilisationPercent: number; classPercent: number; eventPercent: number }>
+  medianApprovalHours: number | null
+  approvedCount: number
+  statusCounts: Array<{ label: string; count: number }>
+  busiestRooms: Array<{ label: string; events: number }>
+  busiestClubs: Array<{ name: string; requests: number }>
+  waitingByOffice: Array<{ label: string; waiting: number; overdue: number }>
 }

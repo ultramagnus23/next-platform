@@ -18,6 +18,7 @@ import type {
   InboxData,
   InboxFilters,
   InboxTab,
+  InsightsData,
   InboxRow,
   Lane,
   MonthDay,
@@ -36,12 +37,14 @@ import type {
   TimelineBlock,
   TransitionSuccess,
 } from '../types'
+import { isoWeekKey } from '../utils'
 import { addDays, endOfMonth, startOfMonth, startOfWeek, todayIST } from '../utils'
 import { canResolveClashes, visibilityOf, waitingOnMe } from './access'
 import { freeRooms, roomDay, roomsDay } from './engine/availability'
 import { chipFor, flagsFor, laneFor, orgStanding, overdueHours } from './engine/flags'
 import { allClashGroups, clashesFor, clashGroupContaining, findClashGroup } from './engine/occupancy'
 import { rankGroup } from './engine/priority'
+import { digestEmail } from './engine/notifications'
 import { availableActions, directBooking, submitRequest, sweep, transition, undoBatch } from './engine/workflow'
 import { KeyedMutex, lockKey } from './lock'
 import { getBookingRepository, type BookingRepository } from './repo'
@@ -100,6 +103,7 @@ function nextRequestId(requests: BookingRequest[]): string {
 export class BookingService {
   private readonly mutex = new KeyedMutex()
   private offsetMs = 0
+  private digestWeek = new Map<string, string>()
 
   constructor(
     private readonly repo: BookingRepository,
@@ -138,11 +142,35 @@ export class BookingService {
   /** Lapses offers, expires started events and sends overdue notices. Cheap when nothing is due. */
   private async sweepNow(): Promise<void> {
     const ctx = await this.loadContext()
-    const result = sweep(ctx, this.now())
-    if (result.requests.length === 0 && result.logs.length === 0 && result.emails.length === 0) return
-    await this.repo.saveRequests(result.requests)
-    await this.repo.appendLogs(result.logs)
-    await this.repo.appendOutbox(result.emails)
+    const now = this.now()
+    const result = sweep(ctx, now)
+    const digests = this.weeklyDigests(ctx, now)
+    const emails = [...result.emails, ...digests]
+    if (result.requests.length === 0 && result.logs.length === 0 && emails.length === 0) return
+    if (result.requests.length > 0) await this.repo.saveRequests(result.requests)
+    if (result.logs.length > 0) await this.repo.appendLogs(result.logs)
+    if (emails.length > 0) await this.repo.appendOutbox(emails)
+  }
+
+  /** One summary per office per ISO week, the first time the sweep runs in that week. */
+  private weeklyDigests(ctx: EngineContext, now: string): OutboxEmail[] {
+    const week = isoWeekKey(todayIST(now))
+    const out: OutboxEmail[] = []
+    for (const office of ctx.settings.offices) {
+      if (this.digestWeek.get(office.id) === week) continue
+      const mine = ctx.requests.filter((r) => r.status === 'pending' && r.stages[r.stageIndex] === office.id)
+      if (mine.length === 0) continue
+      this.digestWeek.set(office.id, week)
+      const late = mine.filter((r) => overdueHours(ctx, r, now) > 0)
+      const groups = allClashGroups(ctx).filter((g) => g.members.some((m) => m.status === 'pending' && m.stages[m.stageIndex] === office.id))
+      const oldest = [...mine]
+        .sort((a, b) => a.stageEnteredAt.localeCompare(b.stageEnteredAt))
+        .slice(0, 5)
+        .map((r) => ({ id: r.id, event: r.eventName, days: Math.max(0, Math.floor((Date.parse(now) - Date.parse(r.stageEnteredAt)) / 86_400_000)) }))
+      const draft = digestEmail({ office, waiting: mine.length, overdue: late.length, clashes: groups.length, oldest })
+      out.push({ ...draft, id: runtimeId('EM'), at: now, status: 'simulated', failReason: null, batchId: null })
+    }
+    return out
   }
 
   private async fresh(): Promise<EngineContext> {
@@ -229,7 +257,10 @@ export class BookingService {
       if (!request) return failure(404, 'Request not found.')
       if (visibilityOf(actor, request, ctx) === 'none') return failure(403, 'You cannot act on this request.')
       const result = transition(request, input, actor, ctx, this.now())
-      if ('error' in result) return fromEngineError(result)
+      if ('error' in result) {
+        if (result.code === 409 && result.error.startsWith('This request changed')) return failure(409, await this.whoActioned(request, ctx))
+        return fromEngineError(result)
+      }
       if (input.action === 'note') {
         await this.repo.appendLogs(result.logs)
         return { ok: true, data: { requests: [], logs: result.logs, emails: [], batchId: '' } }
@@ -382,6 +413,18 @@ export class BookingService {
     return { ok: true, data: settings }
   }
 
+  /** "Already actioned by Student Life Office 2 minutes ago", from the latest log entry. */
+  private async whoActioned(request: BookingRequest, ctx: EngineContext): Promise<string> {
+    const logs = (await this.repo.listLogs(request.id)).filter((l) => !l.internal)
+    const last = logs[logs.length - 1]
+    if (!last || last.actorRole === 'system') return 'This request changed while you were looking at it. Reloaded.'
+    const who =
+      last.actorRole === 'superadmin' ? 'a super admin' : last.actorRole === 'organisation' ? 'the club' : (ctx.settings.offices.find((o) => o.id === last.actorRole)?.shortLabel ?? last.actorRole)
+    const minutes = Math.max(0, Math.round((Date.parse(this.now()) - Date.parse(last.at)) / 60_000))
+    const when = minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : `${Math.round(minutes / 60)} h ago`
+    return `This request changed while you were looking at it. Already actioned by ${who} ${when}. Reloaded.`
+  }
+
   /* ---------------- Demo helpers ---------------- */
 
   async reset(): Promise<void> {
@@ -413,8 +456,9 @@ export class BookingService {
     const ctx = await this.fresh()
     const emails = await this.repo.listOutbox()
     const visible = new Set(ctx.requests.filter((r) => visibilityOf(actor, r, ctx) === 'full').map((r) => r.id))
+    const myInboxes = new Set(ctx.settings.offices.filter((o) => actor.isSuperAdmin || o.id === actor.actingFor).flatMap((o) => o.inboxEmails))
     return emails.filter(
-      (e) => visible.has(e.requestId) && (!filter.trigger || e.trigger === filter.trigger) && (!filter.requestId || e.requestId === filter.requestId),
+      (e) => (visible.has(e.requestId) || (e.requestId === 'DIGEST' && e.to.some((t) => myInboxes.has(t)))) && (!filter.trigger || e.trigger === filter.trigger) && (!filter.requestId || e.requestId === filter.requestId),
     )
   }
 
@@ -675,6 +719,84 @@ export class BookingService {
       const room = ctx.rooms.find((r) => r.id === standing.mostUsedRoomId)
       return { organisation, standing, mostUsedRoom: room ? `${room.building} ${room.name}` : 'None' }
     })
+  }
+
+  /** Plain numbers for planning: how full rooms are, how long approval takes, who is busiest. */
+  async getInsights(actor: Actor): Promise<InsightsData> {
+    void actor
+    const ctx = await this.fresh()
+    const now = this.now()
+    const today = todayIST(now)
+    const to = addDays(today, 6)
+    const byBuilding = new Map<string, { rooms: number; open: number; cls: number; ev: number }>()
+    for (const room of ctx.rooms) {
+      const e = byBuilding.get(room.building) ?? { rooms: 0, open: 0, cls: 0, ev: 0 }
+      e.rooms += 1
+      e.open += (room.openUntilMin - room.openFromMin) * 7
+      byBuilding.set(room.building, e)
+    }
+    const roomBuilding = new Map(ctx.rooms.map((r) => [r.id, r.building]))
+    for (const b of ctx.timetable) {
+      if (b.date < today || b.date > to) continue
+      const e = byBuilding.get(roomBuilding.get(b.roomId) ?? '')
+      if (e) e.cls += b.endMin - b.startMin
+    }
+    const usage = new Map<string, number>()
+    const clubs = new Map<string, number>()
+    for (const r of ctx.requests) {
+      clubs.set(r.organisationId, (clubs.get(r.organisationId) ?? 0) + 1)
+      if (r.status !== 'confirmed') continue
+      usage.set(r.roomId, (usage.get(r.roomId) ?? 0) + 1)
+      if (r.date >= today && r.date <= to) {
+        const e = byBuilding.get(roomBuilding.get(r.roomId) ?? '')
+        if (e) e.ev += r.endMin - r.startMin
+      }
+    }
+    const logs = await this.repo.listLogs()
+    const submitted = new Map<string, number>()
+    const hours: number[] = []
+    for (const l of logs) {
+      if (l.action === 'submitted') submitted.set(l.requestId, Date.parse(l.at))
+      else if ((l.action === 'confirmed' || l.action === 'override_confirmed') && submitted.has(l.requestId)) {
+        hours.push((Date.parse(l.at) - (submitted.get(l.requestId) ?? 0)) / 3_600_000)
+      }
+    }
+    hours.sort((a, b) => a - b)
+    const median = hours.length === 0 ? null : (hours[Math.floor(hours.length / 2)] ?? null)
+    const statusOrder: Array<[string, BookingRequest['status'][]]> = [
+      ['Confirmed', ['confirmed']],
+      ['Waiting for approval', ['pending']],
+      ['Room offered', ['offered']],
+      ['Changes needed', ['changes_requested']],
+      ['Declined', ['rejected']],
+      ['Cancelled or replaced', ['cancelled', 'displaced']],
+      ['Expired', ['expired']],
+    ]
+    const label = (id: string) => {
+      const room = ctx.rooms.find((r) => r.id === id)
+      return room ? `${room.building} ${room.name}` : id
+    }
+    return {
+      buildings: [...byBuilding.entries()].map(([building, e]) => ({
+        building,
+        rooms: e.rooms,
+        classPercent: Math.round((e.cls / e.open) * 100),
+        eventPercent: Math.round((e.ev / e.open) * 100),
+        utilisationPercent: Math.round(((e.cls + e.ev) / e.open) * 100),
+      })),
+      medianApprovalHours: median === null ? null : Math.round(median),
+      approvedCount: hours.length,
+      statusCounts: statusOrder.map(([name, list]) => ({ label: name, count: ctx.requests.filter((r) => list.includes(r.status)).length })),
+      busiestRooms: [...usage.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([id, events]) => ({ label: label(id), events })),
+      busiestClubs: [...clubs.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([id, requests]) => ({ name: ctx.organisations.find((o) => o.id === id)?.name ?? id, requests })),
+      waitingByOffice: ctx.settings.offices.map((o) => {
+        const mine = ctx.requests.filter((r) => r.status === 'pending' && r.stages[r.stageIndex] === o.id)
+        return { label: o.shortLabel, waiting: mine.length, overdue: mine.filter((r) => overdueHours(ctx, r, now) > 0).length }
+      }),
+    }
   }
 
   /** For the sidebar badges. */

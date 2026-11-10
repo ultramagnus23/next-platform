@@ -8,6 +8,7 @@
 import type { ActionInput, Actor, BookingRequest, EngineContext, RequestDraft, ServiceResult, TimetableBlock } from '../../types'
 import { buildOrganisations, buildRooms, buildSettings, orgIdFor, seedActor, seedSuperAdmin } from '../repo/fixtures'
 import { buildSeed } from '../repo/seed'
+import { isoWeekKey, todayIST } from '../../utils'
 import { createIsolatedRepository, type BookingRepository } from '../repo'
 import { BookingService } from '../service'
 import { roomsDay } from './availability'
@@ -475,11 +476,12 @@ async function main(): Promise<void> {
   {
     const w = newWorld()
     const r = await submit(w)
-    const before = (await w.repo.listOutbox()).length
+    const requestMail = async () => (await w.repo.listOutbox()).filter((e) => e.requestId !== 'DIGEST').length
+    const before = await requestMail()
     must(await act(w, slo, r.id, { action: 'note', reason: 'Checked with the facilities team.' }))
     const logs = await w.repo.listLogs(r.id)
     const after = await w.repo.getRequest(r.id)
-    check('S33', 'note is internal, sends nothing, keeps the version', logs.some((l) => l.action === 'note' && l.internal) && (await w.repo.listOutbox()).length === before && after?.version === r.version)
+    check('S33', 'note is internal, sends nothing, keeps the version', logs.some((l) => l.action === 'note' && l.internal) && (await requestMail()) === before && after?.version === r.version)
   }
   // S34
   {
@@ -511,6 +513,35 @@ async function main(): Promise<void> {
     roomsDay(ctx, { date: '2026-11-12', from: 18 * 60, to: 20 * 60, minSeats: 40 })
     const roomsMs = performance.now() - t1
     check('S35', `lanes for ${counted} pending and the rooms summary under 200 ms`, lanesMs < 200 && roomsMs < 200, `lanes ${lanesMs.toFixed(0)} ms, rooms ${roomsMs.toFixed(0)} ms`)
+  }
+  // S36, S37, S38
+  {
+    const w = newWorld()
+    const r = await submit(w, { eventName: 'Slow one' })
+    w.tick(3 * 86_400_000)
+    await sweepWorld(w, slo)
+    let outbox = await w.repo.listOutbox()
+    check('S36a', 'after the response target: overdue email, no escalation yet', outbox.some((e) => e.trigger === 'step_overdue' && e.requestId === r.id) && !outbox.some((e) => e.trigger === 'step_escalated'))
+    w.tick(2 * 86_400_000)
+    await sweepWorld(w, slo)
+    await sweepWorld(w, slo)
+    outbox = await w.repo.listOutbox()
+    const escalations = outbox.filter((e) => e.trigger === 'step_escalated' && e.requestId === r.id)
+    const settings = await w.repo.getSettings()
+    const acadInbox = settings.offices.find((o) => o.id === 'acad')?.inboxEmails[0] ?? ''
+    check('S36b', 'after twice the target: the backup (Academic Booking) is emailed once', escalations.length === 1 && escalations[0]?.to.includes(acadInbox) === true)
+
+    const digests = outbox.filter((e) => e.trigger === 'weekly_digest')
+    check('S37', 'a weekly summary goes out once per office per week', digests.length >= 1 && new Set(digests.map((d) => `${d.to.join()}|${isoWeekKey(todayIST(d.at))}`)).size === digests.length && digests.every((d) => d.requestId === 'DIGEST'))
+  }
+  {
+    const w = newWorld()
+    const r = await submit(w)
+    must(await act(w, slo, r.id, { action: 'approve' }))
+    const stale = await w.svc.performAction(oa, r.id, { action: 'reject', version: r.version, reason: 'Not my request to decide.' })
+    const second = await w.svc.performAction(acad, r.id, { action: 'approve', version: r.version })
+    check('S38', 'a stale action names who already acted', !second.ok && second.code === 409 && /Already actioned by Student Life Office/.test(second.error), second.ok ? 'ok' : second.error)
+    void stale
   }
   void superAdmin
 

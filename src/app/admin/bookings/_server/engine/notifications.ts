@@ -227,3 +227,49 @@ export function overdueEmails(m: MailContext, officeId: OfficeId, label: string)
     }),
   ]
 }
+
+export function escalatedStepEmails(m: MailContext, officeId: OfficeId, backupId: OfficeId, hours: number): EmailDraft[] {
+  const to = inboxesOf(m.offices, [backupId])
+  if (to.length === 0) return []
+  const cc = inboxesOf(m.offices, [officeId])
+  const days = Math.max(1, Math.round(hours / 24))
+  return [
+    compose(m, 'step_escalated', to, cc, {
+      statusWord: 'Escalated, no decision',
+      intro: `A request has waited about ${days} days at ${labelOf(m.offices, officeId)} with no decision. It is sent to ${labelOf(m.offices, backupId)} as the backup.`,
+      next: 'Open it in the Inbox. Super admins and Academic Booking can decide it. The club has not been told yet.',
+    }),
+  ]
+}
+
+export interface DigestInput {
+  office: Office
+  waiting: number
+  overdue: number
+  clashes: number
+  oldest: Array<{ id: string; event: string; days: number }>
+}
+
+/** A weekly summary for one office. Not tied to one request, so its request id is DIGEST. */
+export function digestEmail(input: DigestInput): EmailDraft {
+  const lines = [
+    `This week for ${input.office.label}:`,
+    '',
+    `Waiting on you: ${input.waiting}`,
+    `Overdue: ${input.overdue}`,
+    `In a clash: ${input.clashes}`,
+  ]
+  if (input.oldest.length > 0) {
+    lines.push('', 'Waiting longest:')
+    for (const o of input.oldest) lines.push(`${o.id} ${o.event}, ${o.days} ${o.days === 1 ? 'day' : 'days'}`)
+  }
+  lines.push('', 'What happens next: open the Inbox. Overdue requests are listed first. After twice the response target they go to the backup approver.')
+  return {
+    trigger: 'weekly_digest',
+    requestId: 'DIGEST',
+    to: input.office.inboxEmails,
+    cc: [],
+    subject: `[Room booking] Weekly summary: ${input.waiting} waiting, ${input.overdue} overdue`,
+    text: lines.join('\n'),
+  }
+}

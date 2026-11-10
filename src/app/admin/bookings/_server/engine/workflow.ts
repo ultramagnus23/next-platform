@@ -36,6 +36,7 @@ import {
   confirmedEmails,
   displacedEmails,
   escalatedEmails,
+  escalatedStepEmails,
   expiredEmails,
   forwardedEmails,
   offerLapsedEmails,
@@ -550,6 +551,18 @@ export function sweep(ctx: EngineContext, now: string): TransitionSuccess {
       drafts.push(...offerLapsedEmails({ ...mail, request: updated }))
       continue
     }
+    if (r.status === 'pending' && r.escalationNotified !== r.stageIndex) {
+      const stageOffice = r.stages[r.stageIndex]
+      const target = ctx.settings.offices.find((o) => o.id === stageOffice)?.responseTargetHours ?? 48
+      const late = overdueHours(ctx, r, now)
+      const backup = ctx.settings.offices.find((o) => o.isFinal)?.id
+      if (stageOffice && backup && stageOffice !== backup && late >= target * 2) {
+        requests.push({ ...r, escalationNotified: r.stageIndex, overdueNotified: r.stageIndex })
+        drafts.push(...escalatedStepEmails(mail, stageOffice, backup, late))
+        logs.push(makeLog(ctx, r, system, 'auto_checked', 'pending', 'pending', officeLabel(ctx.settings, stageOffice), 'No decision after twice the response target. Backup approver told.', now, true))
+        continue
+      }
+    }
     if (r.status === 'pending' && r.overdueNotified !== r.stageIndex && overdueHours(ctx, r, now) > 0) {
       const stage = r.stages[r.stageIndex]
       requests.push({ ...r, overdueNotified: r.stageIndex })
@@ -591,6 +604,7 @@ function baseRequest(draft: RequestDraft, ctx: EngineContext, now: string, stage
     amsSyncedAt: null,
     previous: null,
     overdueNotified: null,
+    escalationNotified: null,
     version: 1,
     createdAt: now,
     updatedAt: now,

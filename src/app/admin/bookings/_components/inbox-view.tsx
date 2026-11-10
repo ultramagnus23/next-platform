@@ -89,6 +89,7 @@ export function InboxView({ data, detail, selectedId, lane, q, demo, officeName,
   const [onboard, setOnboard] = useState(false)
   const [snoozed, setSnoozed] = useState<Record<string, number>>({})
   const [showSnoozed, setShowSnoozed] = useState(false)
+  const [groupBy, setGroupBy] = useState<'lane' | 'club' | 'room'>('lane')
   const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -192,8 +193,8 @@ export function InboxView({ data, detail, selectedId, lane, q, demo, officeName,
     router.refresh()
   }, [visible, selectedId, go, router])
 
-  async function approveAllClear() {
-    const items = grouped.clear.map((r) => ({ id: r.request.id, version: r.request.version }))
+  async function approveRows(target: InboxRow[]) {
+    const items = target.filter((r) => r.lane === 'clear').map((r) => ({ id: r.request.id, version: r.request.version }))
     if (items.length === 0) return
     setBulkBusy(true)
     const result = await postJson<BulkResult>('/bulk/approve', { items })
@@ -208,6 +209,21 @@ export function InboxView({ data, detail, selectedId, lane, q, demo, officeName,
     go({ r: null })
     router.refresh()
   }
+
+  const approveAllClear = () => approveRows(grouped.clear)
+
+  // Grouping by club or by room and date, so a recurring series can be approved together.
+  const customGroups = useMemo(() => {
+    if (groupBy === 'lane') return []
+    const map = new Map<string, InboxRow[]>()
+    for (const r of rows) {
+      const key = groupBy === 'club' ? r.organisationName : `${r.roomLabel}, ${formatDate(r.request.date)}`
+      const list = map.get(key)
+      if (list) list.push(r)
+      else map.set(key, [r])
+    }
+    return [...map.entries()].sort((x, y) => y[1].length - x[1].length || x[0].localeCompare(y[0]))
+  }, [rows, groupBy])
 
   function dismissOnboarding() {
     setOnboard(false)
@@ -273,6 +289,23 @@ export function InboxView({ data, detail, selectedId, lane, q, demo, officeName,
         </div>
       )}
 
+      {data.tab === 'review' && data.rows.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-sm" role="group" aria-label="Group by">
+          <span className="text-muted-foreground">Group by</span>
+          {([['lane', 'Type'], ['club', 'Club'], ['room', 'Room and date']] as const).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={groupBy === id}
+              onClick={() => setGroupBy(id)}
+              className={cn('rounded-full border px-3 py-1 text-xs', groupBy === id ? 'border-foreground bg-foreground text-background' : 'border-border hover:bg-accent')}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {rows.length === 0 && (
         <div className="rounded-lg border border-dashed border-border p-10 text-center">
           <p className="font-medium">{data.tab === 'review' ? 'Nothing waiting on you.' : 'Nothing here yet.'}</p>
@@ -286,7 +319,26 @@ export function InboxView({ data, detail, selectedId, lane, q, demo, officeName,
         </div>
       )}
 
-      {data.tab === 'review'
+      {data.tab === 'review' && groupBy !== 'lane' ? (
+        customGroups.map(([name, groupRows]) => {
+          const clearRows = groupRows.filter((r) => r.lane === 'clear')
+          return (
+            <section key={name} aria-label={name} className="grid gap-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <h2>
+                  {name} <span className="font-normal text-muted-foreground tabular-nums">{groupRows.length}</span>
+                </h2>
+                {clearRows.length > 0 && (
+                  <Button size="sm" variant="outline" disabled={bulkBusy} onClick={() => approveRows(groupRows)}>
+                    Approve {clearRows.length} clear
+                  </Button>
+                )}
+              </div>
+              <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">{groupRows.map(rowButton)}</ul>
+            </section>
+          )
+        })
+      ) : data.tab === 'review'
         ? LANES.map((l) => {
             const laneRows = grouped[l]
             if (laneRows.length === 0) return null
