@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import type { RoomDayRow, TimelineBlock } from '../types'
 import { formatClock, formatCompactRange } from '../utils'
 import { SIMULATE_EVENT, SimulateDialog, type SimulateOptions } from './simulate-dialog'
@@ -117,15 +118,7 @@ export function RoomsGrid({ date, groups, openBuilding, windowFrom, windowTo, no
                         b.inClash && 'border-2 border-red-600 bg-red-50 text-red-950 dark:bg-red-950/40 dark:text-red-100',
                       )
                       const style = { left: `${left}%`, width: `${width}%` }
-                      return b.requestId ? (
-                        <Link key={b.id} href={`/admin/bookings/requests/${b.requestId}`} title={label} aria-label={label} className={cls} style={style}>
-                          <span className="truncate">{b.label}</span>
-                        </Link>
-                      ) : (
-                        <div key={b.id} title={label} aria-label={label} className={cls} style={style}>
-                          <span className="truncate">{b.label}</span>
-                        </div>
-                      )
+                      return <EventBlock key={b.id} block={b} others={row.blocks.filter((o) => o.id !== b.id && o.startMin < b.endMin && o.endMin > b.startMin)} label={label} cls={cls} style={style} />
                     })}
                   </div>
                 </div>
@@ -145,5 +138,52 @@ export function RoomsGrid({ date, groups, openBuilding, windowFrom, windowTo, no
         submitLabel="Book room"
       />
     </div>
+  )
+}
+
+interface EventBlockProps {
+  block: TimelineBlock
+  /** Other blocks in the same room that overlap this one in time. */
+  others: TimelineBlock[]
+  label: string
+  cls: string
+  style: React.CSSProperties
+}
+
+/** One event on the grid. Click it for a popup with the detail and what it clashes with. */
+function EventBlock({ block, others, label, cls, style }: EventBlockProps) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button type="button" title={label} aria-label={label} className={cls} style={style} onClick={(e) => e.stopPropagation()}>
+          <span className="truncate">{block.label}</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 text-sm" onClick={(e) => e.stopPropagation()}>
+        <p className="font-semibold">{block.label}</p>
+        <p className="text-muted-foreground">
+          {formatCompactRange(block.startMin, block.endMin)} · {KIND_WORD[block.kind]}
+        </p>
+        {others.length > 0 ? (
+          <div className="mt-2">
+            <p className="font-medium text-[#b3261e] dark:text-red-300">{block.inClash ? 'Clashes with' : 'Overlaps with'}</p>
+            <ul className="mt-1 grid gap-1">
+              {others.map((o) => (
+                <li key={o.id}>
+                  {o.label} <span className="text-muted-foreground">({formatCompactRange(o.startMin, o.endMin)}, {KIND_WORD[o.kind]})</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <p className="mt-2 text-muted-foreground">Nothing else is in this room at that time.</p>
+        )}
+        {block.requestId && (
+          <Link href={`/admin/bookings/requests/${block.requestId}`} className="mt-3 inline-block underline">
+            Open the request
+          </Link>
+        )}
+      </PopoverContent>
+    </Popover>
   )
 }

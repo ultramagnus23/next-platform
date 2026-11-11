@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils'
 import { LANE_TEXT } from '../data'
 import type { BulkResult, InboxData, InboxRow, InboxTab, Lane, RequestDetail } from '../types'
 import { formatCompactRange, formatDate } from '../utils'
+import { GuidedTour, type TourStep } from './guided-tour'
 import { RequestPane } from './request-pane'
 import { postJson, useUndoToast } from './use-booking-action'
 
@@ -18,6 +19,16 @@ const LANES: Lane[] = ['clash', 'look', 'clear']
 const SHOW_FIRST = 8
 const ONBOARD_KEY = 'booking-onboarding-v1'
 const SNOOZE_KEY = 'booking-snoozed-v1'
+
+const TOUR_STEPS: TourStep[] = [
+  { title: 'Welcome to the booking Inbox', body: 'A 40 second tour. Press the right arrow to go on, or Skip to leave. You can replay it any time from the top right.' },
+  { target: '[data-tour="tabs"]', title: 'Sections', body: 'To review is your work. Changes needed is with the club. Approved and Closed are history.' },
+  { target: '[data-tour="list"]', title: 'Requests are sorted for you', body: 'Clashes need a decision. Needs a look has a warning. Clear means there is nothing to check, so approve those together.' },
+  { target: '[data-tour="detail"]', title: 'Open a request to decide', body: 'Pick one to see the room timeline, who it clashes with and what to do. If the room will not work, suggest another one.' },
+  { target: 'a[href="/admin/bookings/rooms"]', title: 'Rooms', body: 'See every room by day, week or month. Click any event for a popup with its time, status and what it clashes with.' },
+  { target: 'a[href="/admin/bookings/clashes"]', title: 'Clashes', body: 'Every double booking in one list, with who is fighting over the room and what else is in the way.' },
+  { title: 'You can undo', body: 'Every decision can be undone for 10 seconds, and the club is emailed for you. Go and try it: this is a private copy, so nothing breaks.' },
+]
 
 const CHIP_TONE: Record<Lane, string> = {
   clash: 'bg-[#fdecea] text-[#b3261e] border-red-300 dark:bg-red-950/40 dark:text-red-200 dark:border-red-800',
@@ -446,33 +457,20 @@ export function InboxView({ data, detail, selectedId, lane, q, demo, officeName,
           <h1>Inbox</h1>
           <p className="text-sm text-muted-foreground">{data.summary}</p>
         </div>
-        <button type="button" className="text-sm underline" onClick={() => setShowHelp(true)}>
-          Keyboard shortcuts
-        </button>
+        <div className="flex items-center gap-4">
+          <button type="button" className="text-sm underline" onClick={() => setOnboard(true)}>
+            Take the tour
+          </button>
+          <button type="button" className="text-sm underline" onClick={() => setShowHelp(true)}>
+            Keyboard shortcuts
+          </button>
+        </div>
       </header>
 
-      {onboard && (
-        <section aria-label="How this works" className="rounded-xl border border-border bg-card p-4">
-          <h2>New here? Three things to know</h2>
-          <ol className="mt-2 grid gap-1.5 text-sm">
-            <li>
-              <strong>1. Requests are sorted for you.</strong> Clashes need a decision. Needs a look has a warning. Clear means there is nothing to check.
-            </li>
-            <li>
-              <strong>2. Approve the Clear ones together.</strong> For the rest, open the request and pick what to do. If a room will not work, suggest another one.
-            </li>
-            <li>
-              <strong>3. You can undo.</strong> Every decision can be undone for 10 seconds. The club is emailed for you.
-            </li>
-          </ol>
-          <Button size="sm" className="mt-3" onClick={dismissOnboarding}>
-            Got it
-          </Button>
-        </section>
-      )}
+      <GuidedTour steps={TOUR_STEPS} open={onboard} onClose={dismissOnboarding} />
 
       <div className="flex flex-wrap items-center gap-3">
-        <div role="tablist" aria-label="Inbox sections" className="flex flex-wrap gap-1 border-b border-border">
+        <div data-tour="tabs" role="tablist" aria-label="Inbox sections" className="flex flex-wrap gap-1 border-b border-border">
           {TABS.map((t) => (
             <button
               key={t.id}
@@ -503,9 +501,9 @@ export function InboxView({ data, detail, selectedId, lane, q, demo, officeName,
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(420px,500px)]">
-        {list}
+        <div data-tour="list" className="min-w-0">{list}</div>
         {isDesktop && (
-          <aside aria-label="Request details" className="min-w-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
+          <aside data-tour="detail" aria-label="Request details" className="min-w-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-2rem)] lg:self-start lg:overflow-y-auto">
             <div className="rounded-xl border border-border bg-card p-4">
               {detail ? <RequestPane detail={detail} demo={demo} onDone={onDone} /> : <p className="text-sm text-muted-foreground">Choose a request on the left to see it here.</p>}
             </div>

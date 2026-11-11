@@ -37,11 +37,15 @@ export default async function ClashesPage() {
                     </span>
                   </span>
                   <span className="min-w-0 text-sm">
-                    <span className="block truncate">{v.members.map((m) => m.request.eventName).join(' vs ')}</span>
+                    <span className="block truncate">{v.members.map((m) => `${m.request.eventName} (${m.organisation.name})`).join(' vs ')}</span>
                     <span className="block truncate text-xs text-muted-foreground">
                       {suggested ? `Suggested: ${suggested.request.eventName}` : 'No suggestion'}
-                      {v.blockers.length > 0 ? ` · ${v.blockers.some((b) => b.kind === 'class') ? 'A class is booked here' : 'Already booked or held'}` : ''}
                     </span>
+                    {v.blockers.length > 0 && (
+                      <span className="block truncate text-xs text-[#b3261e] dark:text-red-300">
+                        Also in the way: {v.blockers.map((b) => `${b.label} (${formatCompactRange(b.startMin, b.endMin)})`).join(', ')}
+                      </span>
+                    )}
                   </span>
                   <span className="whitespace-nowrap text-xs text-muted-foreground">
                     {v.members.length} requests · open {v.openHours >= 48 ? `${Math.round(v.openHours / 24)} days` : `${v.openHours} hours`}
