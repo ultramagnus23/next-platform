@@ -10,7 +10,7 @@ ENV NEXT_TELEMETRY_DISABLED=1 \
     NEXTAUTH_SECRET=sandbox-not-a-secret \
     NEXTAUTH_URL=http://localhost:3000 \
     AUTH_TRUST_HOST=true
-RUN npm run build
+RUN NEXT_FONT_GOOGLE_MOCKED_RESPONSES=/app/scripts/font-mock.js npm run build
 ENV NODE_ENV=production
 EXPOSE 3000
 CMD ["sh", "-c", "npx next start -p ${PORT:-3000}"]
