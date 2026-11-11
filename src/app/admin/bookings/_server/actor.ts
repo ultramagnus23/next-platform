@@ -4,7 +4,7 @@ import { cache } from 'react'
 import { cookies } from 'next/headers'
 import { getAuthenticatedUser } from '@/lib/auth'
 import type { Actor, OfficeId, PersonaId } from '../types'
-import { isDemoMode, isDevBypass, officesForEmail } from './offices'
+import { isDemoMode, isOpenAccess, officesForEmail } from './offices'
 import { actorForPersona } from './repo/fixtures'
 
 export const PERSONA_COOKIE = 'booking_demo_persona'
@@ -32,7 +32,7 @@ function isPersona(value: string | undefined): value is PersonaId {
 export async function resolveActorUncached(): Promise<Actor | null> {
   const user = await getAuthenticatedUser()
   if (user && !user.access.includes('booking_admin')) return null
-  const email = user?.email ?? (isDevBypass() ? DEMO_IDENTITY : null)
+  const email = user?.email ?? (isOpenAccess() ? DEMO_IDENTITY : null)
   if (!email) return null
   const jar = await cookies()
 

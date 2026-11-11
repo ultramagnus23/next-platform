@@ -2,14 +2,14 @@ import { redirect } from 'next/navigation'
 import { SettingsView } from '../_components/settings-view'
 import { resolveActor } from '../_server/actor'
 import { isDemoMode } from '../_server/offices'
-import { getBookingService } from '../_server/service'
+import { getBookingService } from '../_server/booking'
 
 export const dynamic = 'force-dynamic'
 
 export default async function BookingSettingsPage() {
   const actor = await resolveActor()
   if (!actor) redirect('/unauthorized')
-  const service = getBookingService()
+  const service = (await getBookingService())
   const [settings, rooms] = await Promise.all([service.getSettings(), service.listRooms()])
 
   return (

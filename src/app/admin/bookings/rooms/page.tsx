@@ -6,7 +6,7 @@ import { RoomsGrid } from '../_components/rooms-grid'
 import { RoomsMonth, RoomsWeek } from '../_components/rooms-week-month'
 import { resolveActor } from '../_server/actor'
 import { isDemoMode } from '../_server/offices'
-import { getBookingService } from '../_server/service'
+import { getBookingService } from '../_server/booking'
 import { addMonths, formatCompactRange, formatDate } from '../utils'
 
 export const dynamic = 'force-dynamic'
@@ -27,7 +27,7 @@ export default async function RoomsPage({ searchParams }: { searchParams: Promis
   const actor = await resolveActor()
   if (!actor) redirect('/unauthorized')
   const sp = await searchParams
-  const service = getBookingService()
+  const service = (await getBookingService())
 
   const today = service.today()
   const date = /^\d{4}-\d{2}-\d{2}$/.test(first(sp.date) ?? '') ? (first(sp.date) as string) : today

@@ -1,5 +1,5 @@
 import { roomsDayQuerySchema } from '@/app/admin/bookings/schema'
-import { getBookingService } from '@/app/admin/bookings/_server/service'
+import { getBookingService } from '@/app/admin/bookings/_server/booking'
 import { authorise, fail, ok } from '../../helper'
 
 export const dynamic = 'force-dynamic'
@@ -12,7 +12,7 @@ export async function GET(request: Request) {
     if (!parsed.success) return fail(400, 'Invalid query.')
     const { needs, freeOnly, ...rest } = parsed.data
     return ok(
-      await getBookingService().getRoomsDay({
+      await (await getBookingService()).getRoomsDay({
         ...rest,
         needs: needs ? needs.split(',').filter(Boolean) : undefined,
         freeOnly: freeOnly === 'true' || freeOnly === '1',

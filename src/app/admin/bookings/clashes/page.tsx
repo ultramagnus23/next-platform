@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { resolveActor } from '../_server/actor'
-import { getBookingService } from '../_server/service'
+import { getBookingService } from '../_server/booking'
 import { formatCompactRange, formatDate, formatVenue } from '../utils'
 
 export const dynamic = 'force-dynamic'
@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic'
 export default async function ClashesPage() {
   const actor = await resolveActor()
   if (!actor) redirect('/unauthorized')
-  const clashes = await getBookingService().listClashes(actor)
+  const clashes = await (await getBookingService()).listClashes(actor)
 
   return (
     <div className="grid gap-4">

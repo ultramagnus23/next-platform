@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation'
 import { InboxView } from './_components/inbox-view'
 import { resolveActor } from './_server/actor'
 import { isDemoMode } from './_server/offices'
-import { getBookingService } from './_server/service'
+import { getBookingService } from './_server/booking'
 import { inboxFiltersSchema } from './schema'
 
 export const dynamic = 'force-dynamic'
@@ -25,7 +25,7 @@ export default async function InboxPage({ searchParams }: { searchParams: Promis
   const parsed = inboxFiltersSchema.safeParse(raw)
   const filters = parsed.success ? parsed.data : {}
 
-  const service = getBookingService()
+  const service = (await getBookingService())
   const [data, settings] = await Promise.all([service.getInbox(actor, filters), service.getSettings()])
 
   // The detail pane shows the selected row, or the first one.

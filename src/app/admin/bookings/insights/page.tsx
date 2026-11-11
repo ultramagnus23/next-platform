@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation'
 import { resolveActor } from '../_server/actor'
-import { getBookingService } from '../_server/service'
+import { getBookingService } from '../_server/booking'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,7 +15,7 @@ function Bar({ percent, tone = 'bg-primary' }: { percent: number; tone?: string 
 export default async function InsightsPage() {
   const actor = await resolveActor()
   if (!actor) redirect('/unauthorized')
-  const d = await getBookingService().getInsights(actor)
+  const d = await (await getBookingService()).getInsights(actor)
 
   return (
     <div className="grid gap-5">

@@ -16,7 +16,7 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import ThemeToggle from "@/components/ui/theme-toggle";
 
 /** Top bar for the booking admin portal: menu, home link, theme and account. */
-export default function Navbar() {
+export default function Navbar({ hideAccount = false }: { hideAccount?: boolean }) {
   const { data: session } = useSession();
   const email = session?.user?.email ?? null;
 
@@ -28,7 +28,7 @@ export default function Navbar() {
       </Link>
       <div className="ml-auto flex items-center gap-2">
         <ThemeToggle />
-        {email ? (
+        {hideAccount ? null : email ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" aria-label="Account menu">

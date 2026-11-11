@@ -1,14 +1,14 @@
 import { redirect } from 'next/navigation'
 import { OrganisationsTable } from '../_components/organisations-table'
 import { resolveActor } from '../_server/actor'
-import { getBookingService } from '../_server/service'
+import { getBookingService } from '../_server/booking'
 
 export const dynamic = 'force-dynamic'
 
 export default async function OrganisationsPage() {
   const actor = await resolveActor()
   if (!actor) redirect('/unauthorized')
-  const service = getBookingService()
+  const service = (await getBookingService())
   const [rows, settings] = await Promise.all([service.getOrganisations(actor), service.getSettings()])
   const withOffice = rows.map((r) => ({
     ...r,

@@ -1,5 +1,5 @@
 import { demoSubmitSchema } from '@/app/admin/bookings/schema'
-import { getBookingService } from '@/app/admin/bookings/_server/service'
+import { getBookingService } from '@/app/admin/bookings/_server/booking'
 import { authoriseDemo, fail, fromResult, readJson } from '../../helper'
 
 export const dynamic = 'force-dynamic'
@@ -10,7 +10,7 @@ export async function POST(request: Request) {
     if ('response' in gate) return gate.response
     const parsed = demoSubmitSchema.safeParse(await readJson(request))
     if (!parsed.success) return fail(400, 'Check the request details.')
-    const service = getBookingService()
+    const service = (await getBookingService())
     const org = (await service.listOrganisations()).find((o) => o.id === parsed.data.organisationId)
     if (!org) return fail(400, 'Unknown organisation.')
     return fromResult(await service.submit({ ...parsed.data, submittedBy: org.contactEmail }))

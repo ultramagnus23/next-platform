@@ -1,4 +1,4 @@
-import { getBookingService } from '@/app/admin/bookings/_server/service'
+import { getBookingService } from '@/app/admin/bookings/_server/booking'
 import { authoriseDemo, fail, fromResult } from '../../../helper'
 
 export const dynamic = 'force-dynamic'
@@ -8,7 +8,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     const gate = await authoriseDemo()
     if ('response' in gate) return gate.response
     const { id } = await params
-    const service = getBookingService()
+    const service = (await getBookingService())
     const organisationActor = { ...gate.actor, isSuperAdmin: true }
     const detail = await service.getRequestDetail(organisationActor, id)
     if (!detail.ok) return fromResult(detail)

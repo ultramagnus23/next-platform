@@ -1,8 +1,8 @@
 import { redirect } from 'next/navigation'
 import { BookingBar } from './_components/demo-bar'
 import { resolveActor } from './_server/actor'
-import { isDemoMode } from './_server/offices'
-import { getBookingService } from './_server/service'
+import { isDemoMode, isSandbox } from './_server/offices'
+import { getBookingService } from './_server/booking'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,7 +10,7 @@ export default async function BookingsLayout({ children }: { children: React.Rea
   const actor = await resolveActor()
   if (!actor) redirect('/unauthorized')
 
-  const service = getBookingService()
+  const service = (await getBookingService())
   const demo = isDemoMode()
   const [settings, rooms, organisations] = await Promise.all([service.getSettings(), service.listRooms(), service.listOrganisations()])
   const clock = service.clockState()
@@ -19,6 +19,7 @@ export default async function BookingsLayout({ children }: { children: React.Rea
     <div className="booking-scope mx-auto flex w-full max-w-[1500px] flex-col gap-4 pb-8">
       <BookingBar
         demo={demo}
+        sandbox={isSandbox()}
         persona={actor.demoPersona}
         actingFor={actor.actingFor}
         offices={settings.offices.filter((o) => actor.offices.includes(o.id)).map((o) => ({ id: o.id, label: o.label }))}

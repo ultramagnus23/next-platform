@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/auth'
-import { isDemoMode, isDevBypass } from '@/app/admin/bookings/_server/offices'
+import { isDemoMode, isOpenAccess } from '@/app/admin/bookings/_server/offices'
 import { resolveActor } from '@/app/admin/bookings/_server/actor'
 import type { Actor, Blocker, ServiceResult } from '@/app/admin/bookings/types'
 
@@ -27,7 +27,7 @@ export function fromResult<T>(result: ServiceResult<T>): NextResponse<ApiBody<T>
 
 export async function authorise(): Promise<{ actor: Actor } | { response: NextResponse<ApiBody<never>> }> {
   const gate = await requireAuth(['booking_admin'])
-  if (gate instanceof NextResponse && !isDevBypass()) {
+  if (gate instanceof NextResponse && !isOpenAccess()) {
     return { response: fail(gate.status, gate.status === 401 ? 'Authentication required' : 'Insufficient permissions') }
   }
   const actor = await resolveActor()

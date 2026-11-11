@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation'
 import { OutboxView } from '../_components/outbox-view'
 import { resolveActor } from '../_server/actor'
-import { getBookingService } from '../_server/service'
+import { getBookingService } from '../_server/booking'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,7 +18,7 @@ export default async function OutboxPage({ searchParams }: { searchParams: Promi
   const params = await searchParams
   const trigger = first(params.trigger)
   const requestId = first(params.requestId)
-  const emails = await getBookingService().getOutbox(actor, { trigger, requestId })
+  const emails = await (await getBookingService()).getOutbox(actor, { trigger, requestId })
 
   return (
     <div className="grid gap-4">

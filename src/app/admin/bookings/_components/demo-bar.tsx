@@ -13,6 +13,7 @@ import { SIMULATE_EVENT, SimulateDialog, type SimulateOptions, type SimulatePref
 import { postJson } from './use-booking-action'
 
 interface BookingBarProps {
+  sandbox?: boolean
   demo: boolean
   persona: PersonaId | null
   actingFor: OfficeId
@@ -22,7 +23,7 @@ interface BookingBarProps {
 }
 
 /** Acting-for select for everyone, plus demo controls when demo mode is on. */
-export function BookingBar({ demo, persona, actingFor, offices, options, clockLabel }: BookingBarProps) {
+export function BookingBar({ sandbox = false, demo, persona, actingFor, offices, options, clockLabel }: BookingBarProps) {
   const router = useRouter()
   const [simulateOpen, setSimulateOpen] = useState(false)
   const [prefill, setPrefill] = useState<SimulatePrefill | null>(null)
@@ -69,7 +70,7 @@ export function BookingBar({ demo, persona, actingFor, offices, options, clockLa
   return (
     <div className="flex flex-col gap-1.5 rounded-md border border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
       <p>
-        {DEMO_BANNER}
+        {sandbox ? 'Public sandbox: you are working on your own private copy of made-up data. Nothing is saved for long and no emails are sent.' : DEMO_BANNER}
         {clockLabel && <span className="ml-2 font-medium">{clockLabel}</span>}
       </p>
       <div className="flex flex-wrap items-center gap-2">

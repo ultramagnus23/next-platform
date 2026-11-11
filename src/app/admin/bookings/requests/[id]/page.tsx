@@ -3,7 +3,7 @@ import { notFound, redirect } from 'next/navigation'
 import { RequestPageView } from '../../_components/request-page-view'
 import { resolveActor } from '../../_server/actor'
 import { isDemoMode } from '../../_server/offices'
-import { getBookingService } from '../../_server/service'
+import { getBookingService } from '../../_server/booking'
 
 export const dynamic = 'force-dynamic'
 
@@ -11,7 +11,7 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
   const actor = await resolveActor()
   if (!actor) redirect('/unauthorized')
   const { id } = await params
-  const result = await getBookingService().getRequestDetail(actor, id)
+  const result = await (await getBookingService()).getRequestDetail(actor, id)
   if (!result.ok) notFound()
   return (
     <div className="grid gap-3">

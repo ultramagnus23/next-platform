@@ -66,11 +66,26 @@ export function membersOf(id: OfficeId): string[] {
   return [...MEMBERSHIP[id]]
 }
 
-export function isDemoMode(): boolean {
-  return DEMO_MODE
+const SANDBOX_REQUESTED: boolean = process.env.PUBLIC_SANDBOX === 'true'
+// A public sandbox removes the login. It refuses to start next to a real Strapi token, which only a real deployment has.
+const SANDBOX_UNSAFE: boolean = SANDBOX_REQUESTED && process.env.NODE_ENV === 'production' && Boolean(process.env.STRAPI_API_TOKEN)
+if (SANDBOX_UNSAFE) {
+  platform.error('PUBLIC_SANDBOX is ignored because STRAPI_API_TOKEN is set. This looks like a real deployment, so the login stays on.')
 }
 
-/** Local demo only: both flags set and not a production build. Skips sign-in for the booking portal. */
-export function isDevBypass(): boolean {
-  return process.env.NODE_ENV !== 'production' && DEMO_MODE && process.env.BYPASS_AUTH === 'true'
+/** Public sandbox: no sign-in, fake data, one private copy per visitor. Only for a throwaway deployment. */
+export function isSandbox(): boolean {
+  return SANDBOX_REQUESTED && !SANDBOX_UNSAFE
+}
+
+export function isDemoMode(): boolean {
+  return DEMO_MODE || isSandbox()
+}
+
+/**
+ * True when the booking portal skips sign-in: the public sandbox, or a local demo with both flags set
+ * outside production. Never true for a normal production deployment.
+ */
+export function isOpenAccess(): boolean {
+  return isSandbox() || (process.env.NODE_ENV !== 'production' && DEMO_MODE && process.env.BYPASS_AUTH === 'true')
 }

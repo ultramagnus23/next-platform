@@ -26,3 +26,8 @@ export function createIsolatedRepository(data: BookingSeedData): BookingReposito
 }
 
 export type { BookingRepository, BookingSeedData } from './repository'
+
+/** A fresh private copy of the demo data, for one sandbox visitor. */
+export function createDemoRepository(): BookingRepository {
+  return new MemoryBookingRepository(() => buildSeed(new Date().toISOString()))
+}

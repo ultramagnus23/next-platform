@@ -1,5 +1,5 @@
 import { demoResubmitSchema } from '@/app/admin/bookings/schema'
-import { getBookingService } from '@/app/admin/bookings/_server/service'
+import { getBookingService } from '@/app/admin/bookings/_server/booking'
 import { authoriseDemo, fail, fromResult, readJson } from '../../../helper'
 
 export const dynamic = 'force-dynamic'
@@ -11,7 +11,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const parsed = demoResubmitSchema.safeParse((await readJson(request)) ?? {})
     if (!parsed.success) return fail(400, 'Check the new details.')
     const { id } = await params
-    const service = getBookingService()
+    const service = (await getBookingService())
     // The organisation acts here, so the demo borrows super admin rights for this one step.
     const organisationActor = { ...gate.actor, isSuperAdmin: true }
     const detail = await service.getRequestDetail(organisationActor, id)

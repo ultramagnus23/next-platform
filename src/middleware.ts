@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { auth } from './auth'
 import { limitApiRequest } from '@/lib/rate-limit'
 import { platform } from '@/lib/platform-logger'
+import { isSandbox } from '@/app/admin/bookings/_server/offices'
 
 // Routes that need a specific access grant. First match wins.
 const ROUTE_ACCESS: Record<string, string[]> = {
@@ -24,6 +25,19 @@ export default auth(async function middleware(req) {
 
   if (PUBLIC_PATHS.includes(pathname) || pathname.startsWith('/_next/') || pathname.startsWith('/favicon.ico')) {
     return NextResponse.next()
+  }
+
+  // Public sandbox: no sign-in for the booking portal. Each visitor gets a private id in a cookie.
+  if (isSandbox() && (pathname === '/admin' || pathname.startsWith('/admin/bookings') || pathname.startsWith('/api/admin/bookings'))) {
+    const existing = req.cookies.get('booking_sandbox_id')?.value
+    const id = existing && /^[a-z0-9]{16,64}$/.test(existing) ? existing : crypto.randomUUID().replace(/-/g, '')
+    const forwarded = new Headers(req.headers)
+    forwarded.set('x-sandbox-id', id)
+    const response = NextResponse.next({ request: { headers: forwarded } })
+    if (id !== existing) {
+      response.cookies.set('booking_sandbox_id', id, { httpOnly: true, sameSite: 'lax', path: '/', secure: process.env.NODE_ENV === 'production', maxAge: 60 * 60 * 24 })
+    }
+    return response
   }
 
   // Local demo only: with both flags set, the booking portal skips sign-in.

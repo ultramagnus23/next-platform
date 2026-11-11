@@ -97,3 +97,15 @@ Reads share one loaded copy of the data for two seconds, and any write drops it.
 
 Every approver can read every request, room and clash, so they can see what else is booked and what other clubs are asking for.
 Only the offices in a request's chain can act on it, and only Academic Booking and super admins can resolve a clash.
+
+## Public sandbox (no sign-in)
+
+Set `PUBLIC_SANDBOX=true` (with `BOOKING_DEMO_MODE=true`) and the portal needs no login. Each visitor
+gets a private copy of the made-up data, found by the `booking_sandbox_id` cookie, so people never see
+each other's changes. Copies are dropped after `SANDBOX_TTL_MINUTES` (default 90) idle, and at most
+`SANDBOX_MAX_VISITORS` (default 40) exist at once. Data is in memory, so a restart wipes it.
+The flag is ignored in production when `STRAPI_API_TOKEN` is set, so it cannot open a real deployment.
+
+Deploy: push the repo to GitHub, then on Render choose New, Blueprint, pick the repo. `render.yaml` and the
+`Dockerfile` do the rest, and Render gives a public `https://...onrender.com` link. The free plan sleeps
+when idle, so the first visit after a pause takes about a minute. It must stay a single instance.

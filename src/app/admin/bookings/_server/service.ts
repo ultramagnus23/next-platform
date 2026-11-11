@@ -892,17 +892,3 @@ export class BookingService {
     return addDays(this.today(), n)
   }
 }
-
-/* ---------------- Singleton for the app ---------------- */
-
-const GLOBAL_KEY = '__bookingServiceV2__'
-type GlobalWithService = typeof globalThis & { [GLOBAL_KEY]?: BookingService }
-
-export function getBookingService(): BookingService {
-  const holder = globalThis as GlobalWithService
-  const existing = holder[GLOBAL_KEY]
-  if (existing) return existing
-  const created = new BookingService(getBookingRepository())
-  holder[GLOBAL_KEY] = created
-  return created
-}

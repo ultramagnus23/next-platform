@@ -1,0 +1,16 @@
+# Render Blueprint: one free web service running the public booking sandbox.
+services:
+  - type: web
+    name: booking-sandbox
+    runtime: docker
+    plan: free
+    healthCheckPath: /login
+    envVars:
+      - key: PUBLIC_SANDBOX
+        value: "true"
+      - key: BOOKING_DEMO_MODE
+        value: "true"
+      - key: AUTH_TRUST_HOST
+        value: "true"
+      - key: NEXTAUTH_SECRET
+        generateValue: true

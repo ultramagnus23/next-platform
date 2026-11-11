@@ -2,7 +2,7 @@ import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ParamSelect } from '../_components/param-select'
 import { resolveActor } from '../_server/actor'
-import { getBookingService } from '../_server/service'
+import { getBookingService } from '../_server/booking'
 import { agendaFiltersSchema } from '../schema'
 import { formatCompactRange, formatDate, statusLabel } from '../utils'
 
@@ -24,7 +24,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
   if (!actor) redirect('/unauthorized')
   const parsed = agendaFiltersSchema.safeParse(firstValues(await searchParams))
   const filters = parsed.success ? parsed.data : {}
-  const service = getBookingService()
+  const service = (await getBookingService())
   const [rows, rooms, settings] = await Promise.all([service.getAgenda(actor, filters), service.listRooms(), service.getSettings()])
   const buildings = [...new Set(rooms.map((r) => r.building))]
   const today = service.today()
