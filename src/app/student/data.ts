@@ -101,4 +101,8 @@ export const ROLE_DIRECTORY: Record<string, DirectoryEntry> = {
   'Owning department': { mailbox: 'slo@example.test' },
   'Security office': { mailbox: 'security@example.test' },
   'Director, Student Life Office': { mailbox: 'slo-director@example.test' },
+  // The offices as the admin portal names them, used for requests that go through it.
+  OA: { mailbox: 'oa@example.test', backup: 'oa-backup@example.test' },
+  CFE: { mailbox: 'cfe@example.test', backup: 'cfe-backup@example.test' },
+  'Academic Booking': { mailbox: 'acad@example.test', backup: 'acad-backup@example.test' },
 }

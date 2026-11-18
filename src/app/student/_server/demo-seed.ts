@@ -33,21 +33,21 @@ export async function seedStudentDemo(service: StudentService): Promise<void> {
     ...patch,
   })
 
-  service.advanceDays(-9)
+  await service.advanceClock(-9)
   await service.submit(DEMO_ACTOR, base({ eventName: 'Inter-hostel quiz finals', date: dateFrom(service, 21) }))
-  service.advanceDays(9)
+  await service.advanceClock(9)
 
-  service.advanceDays(-12)
+  await service.advanceClock(-12)
   const chess = await service.submit(DEMO_ACTOR, base({ eventName: 'Chess open', venueId: 'takshila', attendance: 90, date: dateFrom(service, 14) }))
-  service.advanceDays(12)
+  await service.advanceClock(12)
   if (chess.ok) {
     await service.recordDecision(chess.data.request.id, { decision: 'approve', by: 'Student Life Office' })
     await service.recordDecision(chess.data.request.id, { decision: 'approve', by: 'Additional review' })
   }
 
-  service.advanceDays(-5)
+  await service.advanceClock(-5)
   const debate = await service.submit(DEMO_ACTOR, base({ eventName: 'Open debate night', venueId: 'multi-purpose-hall', attendance: 300, date: dateFrom(service, 16) }))
-  service.advanceDays(5)
+  await service.advanceClock(5)
   if (debate.ok) {
     await service.recordDecision(debate.data.request.id, {
       decision: 'reject',
@@ -56,9 +56,9 @@ export async function seedStudentDemo(service: StudentService): Promise<void> {
     })
   }
 
-  service.advanceDays(-0.25)
+  await service.advanceClock(-0.25)
   await service.submit(DEMO_ACTOR, base({ eventName: 'Robotics demo day', category: 'academic_society', venueId: 'takshila', attendance: 80, date: dateFrom(service, 25) }))
-  service.advanceDays(0.25)
+  await service.advanceClock(0.25)
 
   // Quiet requests get their reminder emails now, with fresh approve links that still work.
   await service.tick()

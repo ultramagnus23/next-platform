@@ -10,7 +10,7 @@ export async function POST(request: Request) {
     if ('response' in gate) return gate.response
     const parsed = advanceSchema.safeParse(await readJson(request))
     if (!parsed.success) return fail(400, 'Choose between 1 and 60 days.')
-    return ok((await getStudentService()).advanceDays(parsed.data.days))
+    return ok(await (await getStudentService()).advanceClock(parsed.data.days))
   } catch (err) {
     platform.error('POST /api/student/demo/advance-clock error:', err)
     return fail(500, 'Internal server error')

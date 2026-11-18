@@ -20,12 +20,15 @@ import type {
   StudentRequest,
 } from '../types'
 import { addDays, eventInstant, istDateOf, latestOf, MS_PER_DAY } from '../utils'
+import type { Bridge } from './bridge'
 import { resolveBackup, resolveRecipient } from './email/directory'
 import { Notifier } from './email/notifier'
 import { DryRunTransport, type MailTransport } from './email/transport'
 import { clockOf } from './repo/memory'
 import type { StudentRepository } from './repo/repository'
 import { verifyToken } from './tokens'
+
+const APPROVED_ACTIONS = new Set(['confirmed', 'auto_approved', 'override_confirmed'])
 
 const fail = (code: 400 | 403 | 404 | 409, error: string, extra: { reason?: string; unlockAt?: string | null } = {}) => ({ ok: false as const, code, error, ...extra })
 
@@ -38,11 +41,13 @@ export class StudentService {
   private mutex = new KeyedMutex()
 
   private readonly notifier: Notifier
+  private readonly bridge: Bridge | null
 
   constructor(
     private readonly repo: StudentRepository,
-    options: Partial<{ transport: MailTransport; tokenSecret: string; baseUrl: string; messageIdDomain: string }> = {},
+    options: Partial<{ transport: MailTransport; tokenSecret: string; baseUrl: string; messageIdDomain: string; bridge: Bridge }> = {},
   ) {
+    this.bridge = options.bridge ?? null
     this.notifier = new Notifier(repo, {
       transport: options.transport ?? new DryRunTransport(),
       tokenSecret: options.tokenSecret ?? '',
@@ -53,6 +58,13 @@ export class StudentService {
 
   now(): Date {
     return new Date(Date.now() + this.offsetDays * MS_PER_DAY)
+  }
+
+  /** Moves this clock and the admin clock together, so a linked request never sees two different dates. */
+  async advanceClock(days: number): Promise<{ now: string; offsetDays: number }> {
+    const state = this.advanceDays(days)
+    if (this.bridge) await this.bridge.advanceDays(days)
+    return state
   }
 
   /** Today's date in IST, YYYY-MM-DD. */
@@ -100,6 +112,14 @@ export class StudentService {
     if (venue.capacity !== null && input.attendance > venue.capacity) return fail(400, `${venue.label} seats ${venue.capacity}.`)
 
     const path = await this.previewPath(input)
+    // A bridged space is also created in the admin portal, which checks the room and the timetable. If it
+    // refuses, so do we, and the club sees why instead of a request that can never be approved.
+    let adminRequestId: string | null = null
+    if (this.bridge?.canMirror(venue.id)) {
+      const mirrored = await this.bridge.mirror(actor, input)
+      if (!mirrored.ok) return fail(409, mirrored.error, { reason: 'slot_unavailable' })
+      adminRequestId = mirrored.adminId
+    }
     const at = now.toISOString()
     const id = this.repo.nextId('sr')
     const request: StudentRequest = {
@@ -126,6 +146,7 @@ export class StudentService {
       followupCount: 0,
       urgencyFollowupUsed: false,
       rootMessageId: this.notifier.rootIdFor(id),
+      adminRequestId,
       previousRequestId,
       decisionReason: null,
       routeConfirmed: path.routeConfirmed,
@@ -158,8 +179,9 @@ export class StudentService {
   }
 
   async getDetail(actor: StudentActor, id: string): Promise<Result<RequestDetail>> {
-    const request = await this.repo.getRequest(id)
-    if (!this.owned(request, actor)) return fail(404, 'Request not found.')
+    const stored = await this.repo.getRequest(id)
+    if (!this.owned(stored, actor)) return fail(404, 'Request not found.')
+    const request = await this.syncFromAdmin(stored)
     const config = await this.repo.getConfig()
     const now = this.now()
     return {
@@ -168,7 +190,7 @@ export class StudentService {
         request,
         status: deriveStatus(request, config, now),
         steps: await this.repo.getSteps(id),
-        events: await this.repo.listEvents(id),
+        events: (await this.repo.listEvents(id)).sort((a, b) => a.at.localeCompare(b.at)),
         followup: followupEligibility(clockOf(request), config, now),
       },
     }
@@ -179,7 +201,8 @@ export class StudentService {
     const config = await this.repo.getConfig()
     const now = this.now()
     const rows: RequestListRow[] = []
-    for (const request of await this.repo.listRequests(actor.organisationId)) {
+    for (const stored of await this.repo.listRequests(actor.organisationId)) {
+      const request = await this.syncFromAdmin(stored)
       const steps = await this.repo.getSteps(request.id)
       rows.push({ request, status: deriveStatus(request, config, now), currentRole: steps.find((s) => s.state === 'current')?.role ?? null })
     }
@@ -190,10 +213,13 @@ export class StudentService {
 
   /** The follow-up. The rule is enforced inside the repository's single atomic update, never here. */
   async sendFollowup(actor: StudentActor, id: string): Promise<Result<RequestDetail>> {
-    const request = await this.repo.getRequest(id)
-    if (!this.owned(request, actor)) return fail(404, 'Request not found.')
+    const stored = await this.repo.getRequest(id)
+    if (!this.owned(stored, actor)) return fail(404, 'Request not found.')
+    // Read what the office did first, so activity there restarts the window before the rule is checked.
+    await this.syncFromAdmin(stored)
     const claim = await this.repo.claimFollowup(id, this.now(), actor.email)
     if (!claim.ok) return fail(409, 'A reminder cannot be sent now.', { reason: claim.result.reason, unlockAt: claim.result.unlockAt })
+    if (claim.request.adminRequestId && this.bridge) await this.bridge.note(claim.request.adminRequestId, 'The club sent a reminder.').catch(() => undefined)
     const steps = await this.repo.getSteps(id)
     await this.notifyOffice('followup', claim.request, steps.find((x) => x.state === 'current'), claim.request.followupCount)
     return this.getDetail(actor, id)
@@ -209,6 +235,7 @@ export class StudentService {
       const ok = await this.repo.updateRequest({ ...request, status: 'cancelled', version: request.version + 1, updatedAt: at })
       if (!ok) return fail(409, 'This request changed. Reload and try again.')
       await this.log(id, 'cancelled', actor.email, 'Request cancelled')
+      if (request.adminRequestId && this.bridge) await this.bridge.withdraw(request.adminRequestId).catch(() => undefined)
       const open = (await this.repo.getSteps(id)).find((x) => x.state === 'current')
       await this.notifyStudent('cancelled', { ...request, status: 'cancelled' }, open?.role ?? null, 1)
       return this.getDetail(actor, id)
@@ -234,9 +261,21 @@ export class StudentService {
   async recordDecision(id: string, input: DecisionInput): Promise<Result<RequestDetail>> {
     const release = await this.mutex.acquire([id])
     try {
-      const request = await this.repo.getRequest(id)
-      if (!request) return fail(404, 'Request not found.')
+      const stored = await this.repo.getRequest(id)
+      if (!stored) return fail(404, 'Request not found.')
+      const request = await this.syncFromAdmin(stored)
       if (request.status !== 'pending') return fail(409, 'This request is no longer waiting for a decision.')
+      if (request.adminRequestId && this.bridge) {
+        if (input.decision === 'comment') await this.bridge.note(request.adminRequestId, input.reason)
+        else {
+          const done = await this.bridge.decide(request.adminRequestId, input.decision, input.decision === 'reject' ? input.reason : undefined)
+          if (!done.ok) return fail(input.decision === 'reject' && !input.reason.trim() ? 400 : 409, done.error)
+        }
+        const synced = await this.repo.getRequest(id)
+        if (!synced) return fail(404, 'Request not found.')
+        await this.syncFromAdmin(synced)
+        return this.getDetail({ organisationId: synced.organisationId, organisationName: synced.organisationName, email: synced.submittedBy }, id)
+      }
       const steps = await this.repo.getSteps(id)
       const current = steps.find((s) => s.state === 'current')
       if (!current) return fail(409, 'No office is waiting on this request.')
@@ -322,6 +361,72 @@ export class StudentService {
     }
     await this.drainOutbox()
     return written
+  }
+
+  /* ---------------- Admin portal link ---------------- */
+
+  /**
+   * Brings a linked request in line with the admin portal, which decides. Rebuilds the path from the admin
+   * chain, copies the office's actions into the activity log once each (keyed by the admin log id), moves
+   * the status, and sends the matching emails once. A request the club cancelled stays cancelled.
+   */
+  private async syncFromAdmin(request: StudentRequest): Promise<StudentRequest> {
+    if (!this.bridge || !request.adminRequestId || request.status === 'cancelled') return request
+    const view = await this.bridge.view(request.adminRequestId)
+    if (!view) return request
+
+    const wait = (await this.repo.getConfig()).followupWaitDays
+    const before = await this.repo.getSteps(request.id)
+    const steps: ApprovalStepRecord[] = view.stages.map((stage, i) => ({
+      id: before[i]?.role === stage.role ? (before[i]?.id ?? this.repo.nextId('st')) : this.repo.nextId('st'),
+      requestId: request.id,
+      position: i,
+      role: stage.role,
+      why: 'This office decides in the admin portal',
+      confirmed: true,
+      state: stage.state,
+      decidedAt: stage.decidedAt,
+      decidedBy: stage.decidedBy,
+      reason: stage.state === 'rejected' ? view.reason : null,
+    }))
+
+    const written: Array<{ action: string; position: number }> = []
+    const actions: Record<string, RequestEvent['type']> = { forwarded: 'step_approved', confirmed: 'step_approved', auto_approved: 'step_approved', override_confirmed: 'step_approved', rejected: 'step_rejected' }
+    for (const log of view.logs) {
+      if (log.action === 'submitted' || log.action === 'auto_checked' || log.action === 'resubmitted') continue
+      const type = actions[log.action] ?? 'comment'
+      const detail = `${log.stageLabel ?? 'The office'}: ${log.action.replace(/_/g, ' ')}${log.reason ? `. ${log.reason}` : ''}`
+      const fresh = await this.repo.appendEvent({ id: this.repo.nextId('ev'), requestId: request.id, type, at: log.at, actor: log.actorEmail, detail, key: `admin:${log.id}` })
+      if (fresh) written.push({ action: log.action, position: steps.filter((x) => x.state === 'approved').length })
+    }
+
+    const changed =
+      view.status !== request.status ||
+      view.lastApproverActivityAt !== request.lastApproverActivityAt ||
+      view.reason !== request.decisionReason ||
+      JSON.stringify(steps.map((x) => [x.role, x.state])) !== JSON.stringify(before.map((x) => [x.role, x.state]))
+    if (!changed) return request
+
+    const at = this.now()
+    const updated: StudentRequest = {
+      ...request,
+      status: view.status,
+      decisionReason: view.reason,
+      lastApproverActivityAt: view.lastApproverActivityAt ?? request.lastApproverActivityAt,
+      nextFollowupAllowedAt: view.lastApproverActivityAt ? addDays(new Date(view.lastApproverActivityAt), wait).toISOString() : request.nextFollowupAllowedAt,
+      version: request.version + 1,
+      updatedAt: at.toISOString(),
+    }
+    if (!(await this.repo.updateRequest(updated, steps))) return (await this.repo.getRequest(request.id)) ?? request
+
+    for (const w of written) {
+      if (w.action === 'rejected') await this.notifyStudent('not_approved', updated, steps.find((x) => x.state === 'rejected')?.role ?? null, 1, { role: steps.find((x) => x.state === 'rejected')?.role, reason: view.reason ?? undefined })
+      else if (w.action === 'forwarded') {
+        const next = steps.find((x) => x.state === 'current')
+        if (next) await this.notifyOffice('forwarded', updated, next, next.position + 1)
+      } else if (APPROVED_ACTIONS.has(w.action)) await this.notifyStudent('approved', updated, steps.at(-1)?.role ?? null, 1)
+    }
+    return updated
   }
 
   /* ---------------- Email ---------------- */

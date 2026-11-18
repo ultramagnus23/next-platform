@@ -122,6 +122,8 @@ export interface StudentRequest {
   urgencyFollowupUsed: boolean
   /** Set when the first email goes out (M3). Every later email threads under it. */
   rootMessageId: string | null
+  /** The mirrored request in the admin portal, or null when the space is not bridged. */
+  adminRequestId: string | null
   /** The rejected request this one resubmits, if any. */
   previousRequestId: string | null
   /** The office's reason when rejected, shown in full to the student. */

@@ -137,3 +137,12 @@ Hooks proposed, not enabled: a Stop hook running `npm run typecheck` and `npm ru
 - The platform mailer sends through Gmail accounts (TECHMAIL_ID and others). Gmail's SMTP may rewrite the Message-ID we set, which would break threading. This is not confirmed. Before going live, send one test thread to a real inbox and check the headers. A transactional provider that honours a custom Message-ID is the safer route.
 - Approve links are single use and expire after 24 hours. A link older than that needs a fresh reminder email, which the scheduler sends on its reminder day.
 - Send failures retry after 1, 2, 4 and 8 minutes, then the row is marked dead. Bounce and complaint webhooks are not wired: recordBounce exists but nothing calls it yet.
+
+## 14. M5 notes (joined to the admin portal)
+
+- A student request for a bridged space is also created in the admin portal, so it shows in the Inbox and follows the admin chain (offices and stages as the admin portal names them). The admin portal decides. The student side rebuilds its path and status from the admin request each time it is read, and copies each office action into the activity log once.
+- Bridged spaces today: Dr. Reddy's Auditorium, Black Box Theatre, Dance Studio and Multi-Purpose Hall (matched to the room "MPH" in the Admin Block, 200 seats in the admin list against 400 in the brief, so confirm). Takshila, the Residence Hall and the Sports Block have no admin room, so those requests stay student only.
+- The route table from the brief still drives the preview on the form. After sending, a bridged request shows the admin chain instead. Reconciling the two is open question 8.
+- A club cancelling a bridged request is recorded in the admin portal as not approved with the reason "Withdrawn by the club." because the admin portal has no withdraw action. Add one if that wording is wrong for the offices.
+- A follow-up shows in the admin request log as a note. Moving the demo clock from the student page moves the admin clock too. Moving it from the admin demo bar does not move the student clock.
+- The admin portal refuses very little (it flags). So the slot conflict screen with three alternatives is still not built.
