@@ -89,7 +89,7 @@ describe('dry run and sending', () => {
     const { service, id, repo } = await setup()
     service.advanceDays(8)
     await service.sendFollowup(ACTOR, id)
-    for (const row of await repo.listOutbox(id)) expect(row.text + row.subject).not.toContain('—')
+    for (const row of await repo.listOutbox(id)) expect(row.text + row.subject).not.toContain(String.fromCharCode(0x2014))
   })
 })
 
