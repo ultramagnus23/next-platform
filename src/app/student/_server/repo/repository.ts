@@ -1,5 +1,5 @@
 import type { FollowupResult } from '../../logic/followup'
-import type { ApprovalStepRecord, BookingConfig, RequestEvent, RouteRule, StudentRequest } from '../../types'
+import type { ApprovalStepRecord, ApprovalToken, BookingConfig, OutboxRow, RequestEvent, RouteRule, StudentRequest, Suppression } from '../../types'
 
 export type ClaimResult =
   | { ok: true; request: StudentRequest; event: RequestEvent }
@@ -32,4 +32,26 @@ export interface StudentRepository {
   listEvents(requestId: string): Promise<RequestEvent[]>
 
   claimFollowup(requestId: string, now: Date, actor: string): Promise<ClaimResult>
+
+  /**
+   * Outbox. enqueueOutbox enforces a unique key on (request, template, recipient, sequence) and returns
+   * false, writing nothing, when it already exists. claimDueOutbox is the SELECT ... FOR UPDATE SKIP LOCKED:
+   * it hands each due row to exactly one worker and hides it until the lease runs out.
+   */
+  enqueueOutbox(row: OutboxRow): Promise<boolean>
+  hasOutbox(requestId: string, template: string, to: string, sequence: number): Promise<boolean>
+  claimDueOutbox(now: Date, limit: number, leaseMs: number): Promise<OutboxRow[]>
+  markOutboxSent(id: string, providerId: string | null, now: Date): Promise<void>
+  /** Counts the attempt, backs off, and marks the row dead after maxAttempts. */
+  markOutboxFailed(id: string, error: string, now: Date, maxAttempts: number): Promise<OutboxRow | null>
+  markOutboxSuppressed(id: string): Promise<void>
+  listOutbox(requestId?: string): Promise<OutboxRow[]>
+
+  addSuppression(suppression: Suppression): Promise<void>
+  isSuppressed(email: string): Promise<boolean>
+
+  insertToken(token: ApprovalToken): Promise<void>
+  getToken(jti: string): Promise<ApprovalToken | null>
+  /** Marks the token used only if it exists, is unused and has not expired. True for exactly one caller. */
+  consumeToken(jti: string, now: Date): Promise<boolean>
 }

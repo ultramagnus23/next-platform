@@ -31,6 +31,10 @@ export interface MailParams {
   cc?: string | string[];
   bcc?: string | string[];
   replyTo?: string | string[];
+  /** Set so replies thread. Used by the student booking emails. */
+  messageId?: string;
+  inReplyTo?: string;
+  references?: string[];
   attachments?: Array<{
     filename: string;
     content: Buffer | string;
@@ -65,6 +69,9 @@ export async function sendMailWith(credentials: MailCredentials, params: MailPar
       from: fromHeader,
       to: params.to,
       replyTo: params.replyTo,
+      messageId: params.messageId,
+      inReplyTo: params.inReplyTo,
+      references: params.references,
       subject: params.subject,
       text: params.text,
       html: params.html,

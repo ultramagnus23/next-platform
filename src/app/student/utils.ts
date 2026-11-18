@@ -33,3 +33,28 @@ export function latestOf(values: Array<string | null>): Date | null {
   }
   return best
 }
+
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** "Fri 5 Dec" from a YYYY-MM-DD date. Absolute, never "tomorrow". */
+export function formatDay(date: string): string {
+  const [y, m, d] = date.split('-').map(Number)
+  const day = new Date(Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1))
+  return `${DAYS[day.getUTCDay()]} ${day.getUTCDate()} ${MONTHS[day.getUTCMonth()]}`
+}
+
+/** "6:30pm" from minutes after midnight. */
+export function formatTime(min: number): string {
+  const h = Math.floor(min / 60) % 24
+  const m = min % 60
+  const hour = h % 12 === 0 ? 12 : h % 12
+  return `${hour}${m ? `:${String(m).padStart(2, '0')}` : ''}${h < 12 ? 'am' : 'pm'}`
+}
+
+/** "Tue 25 Nov, 9:06pm" in IST from an instant. */
+export function formatInstant(iso: string): string {
+  const shifted = new Date(new Date(iso).getTime() + IST_OFFSET_MIN * 60_000)
+  const date = shifted.toISOString().slice(0, 10)
+  return `${formatDay(date)}, ${formatTime(shifted.getUTCHours() * 60 + shifted.getUTCMinutes())}`
+}

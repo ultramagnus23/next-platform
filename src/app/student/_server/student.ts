@@ -2,7 +2,9 @@ import 'server-only'
 
 import { isSandbox } from '@/app/admin/bookings/_server/offices'
 import { MAX_VISITORS, TTL_MS, visitorId } from '@/app/admin/bookings/_server/booking'
+import { APPROVAL_SECRET, BASE_URL, EMAIL_LIVE, MESSAGE_ID_DOMAIN } from './config'
 import { seedStudentDemo } from './demo-seed'
+import { DryRunTransport, SmtpTransport } from './email/transport'
 import { MemoryStudentRepository } from './repo/memory'
 import { StudentService } from './service'
 
@@ -18,8 +20,11 @@ type Entry = { service: StudentService; last: number }
 type Holder = typeof globalThis & { [SHARED_KEY]?: Promise<StudentService>; [VISITORS_KEY]?: Map<string, Entry> }
 
 async function build(): Promise<StudentService> {
-  const service = new StudentService(new MemoryStudentRepository())
-  if (isSandbox() || process.env.BOOKING_DEMO_MODE === 'true') await seedStudentDemo(service)
+  const demo = isSandbox() || process.env.BOOKING_DEMO_MODE === 'true'
+  // Demo and sandbox never send real mail, whatever else is set.
+  const transport = EMAIL_LIVE && !demo ? new SmtpTransport() : new DryRunTransport((line) => platform.log(line))
+  const service = new StudentService(new MemoryStudentRepository(), { transport, tokenSecret: APPROVAL_SECRET, baseUrl: BASE_URL, messageIdDomain: MESSAGE_ID_DOMAIN })
+  if (demo) await seedStudentDemo(service)
   return service
 }
 

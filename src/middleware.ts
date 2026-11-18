@@ -23,7 +23,10 @@ export default auth(async function middleware(req) {
   const limited = limitApiRequest(pathname, req.method, req.headers, req.auth?.user?.email)
   if (limited) return limited
 
-  if (PUBLIC_PATHS.includes(pathname) || pathname.startsWith('/_next/') || pathname.startsWith('/favicon.ico')) {
+  // Approve links from emails: the signed token in the URL is the credential, checked by the route itself.
+  const approveLink = pathname.startsWith('/student/approve/') || pathname.startsWith('/api/student/approve/')
+
+  if (PUBLIC_PATHS.includes(pathname) || approveLink || pathname.startsWith('/_next/') || pathname.startsWith('/favicon.ico')) {
     return NextResponse.next()
   }
 

@@ -130,3 +130,10 @@ Shared with admin by import from the admin owner's folder (rooms, offices, repos
 8. Strapi port and pilot with one office (after the questions in section 2 are answered).
 
 Hooks proposed, not enabled: a Stop hook running `npm run typecheck` and `npm run lint`, and a check rejecting em dashes and forbidden fonts in source.
+
+## 13. M3 notes (email)
+
+- Sending is dry-run unless EMAIL_MODE is live AND EMAIL_DOMAIN_VERIFIED is true. The sandbox and demo mode never send real mail, whatever else is set.
+- The platform mailer sends through Gmail accounts (TECHMAIL_ID and others). Gmail's SMTP may rewrite the Message-ID we set, which would break threading. This is not confirmed. Before going live, send one test thread to a real inbox and check the headers. A transactional provider that honours a custom Message-ID is the safer route.
+- Approve links are single use and expire after 24 hours. A link older than that needs a fresh reminder email, which the scheduler sends on its reminder day.
+- Send failures retry after 1, 2, 4 and 8 minutes, then the row is marked dead. Bounce and complaint webhooks are not wired: recordBounce exists but nothing calls it yet.

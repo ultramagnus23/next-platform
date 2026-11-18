@@ -56,7 +56,10 @@ export async function seedStudentDemo(service: StudentService): Promise<void> {
     })
   }
 
-  service.advanceDays(-1)
+  service.advanceDays(-0.25)
   await service.submit(DEMO_ACTOR, base({ eventName: 'Robotics demo day', category: 'academic_society', venueId: 'takshila', attendance: 80, date: dateFrom(service, 25) }))
-  service.advanceDays(1)
+  service.advanceDays(0.25)
+
+  // Quiet requests get their reminder emails now, with fresh approve links that still work.
+  await service.tick()
 }

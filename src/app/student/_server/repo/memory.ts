@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto'
 import { DEFAULT_CONFIG, ROUTE_RULES } from '../../data'
 import { followupEligibility } from '../../logic/followup'
-import type { ApprovalStepRecord, BookingConfig, RequestEvent, RouteRule, StudentRequest } from '../../types'
+import type { ApprovalStepRecord, ApprovalToken, BookingConfig, OutboxRow, RequestEvent, RouteRule, StudentRequest, Suppression } from '../../types'
 import { addDays, istDateOf, eventInstant } from '../../utils'
 import type { ClaimResult, StudentRepository } from './repository'
 
@@ -24,6 +25,9 @@ export class MemoryStudentRepository implements StudentRepository {
   private events: RequestEvent[] = []
   private eventKeys = new Set<string>()
   private counters = new Map<string, number>()
+  private outbox: OutboxRow[] = []
+  private suppressions = new Map<string, Suppression>()
+  private tokens = new Map<string, ApprovalToken>()
 
   async getConfig() {
     return { ...this.config }
@@ -125,5 +129,102 @@ export class MemoryStudentRepository implements StudentRepository {
     }
     this.pushEvent(event)
     return { ok: true, request: { ...updated }, event }
+  }
+
+  /* ---------------- Outbox ---------------- */
+
+  private outboxKey(requestId: string, template: string, to: string, sequence: number): string {
+    return createHash('sha256').update(`${requestId}|${template}|${to.toLowerCase()}|${sequence}`).digest('hex')
+  }
+
+  async hasOutbox(requestId: string, template: string, to: string, sequence: number) {
+    const key = this.outboxKey(requestId, template, to, sequence)
+    return this.outbox.some((r) => r.idempotencyKey === key)
+  }
+
+  async enqueueOutbox(row: OutboxRow) {
+    const key = this.outboxKey(row.requestId, row.template, row.to, row.sequence)
+    if (this.outbox.some((r) => r.idempotencyKey === key)) return false
+    this.outbox.push({ ...row, idempotencyKey: key, cc: [...row.cc], references: [...row.references] })
+    return true
+  }
+
+  async claimDueOutbox(now: Date, limit: number, leaseMs: number) {
+    const t = now.getTime()
+    const due = this.outbox
+      .filter((r) => (r.status === 'queued' || (r.status === 'sending' && r.lockedUntil !== null && Date.parse(r.lockedUntil) <= t)) && Date.parse(r.nextAttemptAt) <= t)
+      .slice(0, limit)
+    for (const row of due) {
+      row.status = 'sending'
+      row.lockedUntil = new Date(t + leaseMs).toISOString()
+    }
+    return due.map((r) => ({ ...r, cc: [...r.cc], references: [...r.references] }))
+  }
+
+  private row(id: string): OutboxRow | undefined {
+    return this.outbox.find((r) => r.id === id)
+  }
+
+  async markOutboxSent(id: string, providerId: string | null, now: Date) {
+    const r = this.row(id)
+    if (!r) return
+    r.status = 'sent'
+    r.providerId = providerId
+    r.sentAt = now.toISOString()
+    r.lockedUntil = null
+    r.lastError = null
+  }
+
+  async markOutboxFailed(id: string, error: string, now: Date, maxAttempts: number) {
+    const r = this.row(id)
+    if (!r) return null
+    r.attempts += 1
+    r.lastError = error
+    r.lockedUntil = null
+    if (r.attempts >= maxAttempts) r.status = 'dead'
+    else {
+      r.status = 'queued'
+      // 1, 2, 4, 8 minutes and so on, never more than 6 hours.
+      r.nextAttemptAt = new Date(now.getTime() + Math.min(2 ** (r.attempts - 1) * 60_000, 6 * 3_600_000)).toISOString()
+    }
+    return { ...r, cc: [...r.cc], references: [...r.references] }
+  }
+
+  async markOutboxSuppressed(id: string) {
+    const r = this.row(id)
+    if (r) {
+      r.status = 'suppressed'
+      r.lockedUntil = null
+    }
+  }
+
+  async listOutbox(requestId?: string) {
+    return this.outbox.filter((r) => !requestId || r.requestId === requestId).map((r) => ({ ...r, cc: [...r.cc], references: [...r.references] }))
+  }
+
+  async addSuppression(suppression: Suppression) {
+    this.suppressions.set(suppression.email.toLowerCase(), { ...suppression })
+  }
+
+  async isSuppressed(email: string) {
+    return this.suppressions.has(email.toLowerCase())
+  }
+
+  /* ---------------- Approval tokens ---------------- */
+
+  async insertToken(token: ApprovalToken) {
+    this.tokens.set(token.jti, { ...token })
+  }
+
+  async getToken(jti: string) {
+    const t = this.tokens.get(jti)
+    return t ? { ...t } : null
+  }
+
+  async consumeToken(jti: string, now: Date) {
+    const t = this.tokens.get(jti)
+    if (!t || t.usedAt !== null || now.getTime() > Date.parse(t.expiresAt)) return false
+    t.usedAt = now.toISOString()
+    return true
   }
 }

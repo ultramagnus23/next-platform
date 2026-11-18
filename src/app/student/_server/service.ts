@@ -1,11 +1,15 @@
 import { KeyedMutex } from '@/app/admin/bookings/_server/lock'
-import { STUDENT_VENUES } from '../data'
+import { ADMIN_MAILBOX, STUDENT_VENUES } from '../data'
 import { approvalPath } from '../logic/approval-path'
 import { followupEligibility } from '../logic/followup'
 import { deriveStatus, overallFromSteps } from '../logic/status'
 import type {
   ApprovalStepRecord,
+  ApprovalSummary,
   DecisionInput,
+  EmailTemplate,
+  OutboxRow,
+  TokenProblem,
   NewRequestInput,
   RequestDetail,
   RequestEvent,
@@ -16,8 +20,12 @@ import type {
   StudentRequest,
 } from '../types'
 import { addDays, eventInstant, latestOf, MS_PER_DAY } from '../utils'
+import { resolveBackup, resolveRecipient } from './email/directory'
+import { Notifier } from './email/notifier'
+import { DryRunTransport, type MailTransport } from './email/transport'
 import { clockOf } from './repo/memory'
 import type { StudentRepository } from './repo/repository'
+import { verifyToken } from './tokens'
 
 const fail = (code: 400 | 403 | 404 | 409, error: string, extra: { reason?: string; unlockAt?: string | null } = {}) => ({ ok: false as const, code, error, ...extra })
 
@@ -29,7 +37,19 @@ export class StudentService {
   private offsetDays = 0
   private mutex = new KeyedMutex()
 
-  constructor(private readonly repo: StudentRepository) {}
+  private readonly notifier: Notifier
+
+  constructor(
+    private readonly repo: StudentRepository,
+    options: Partial<{ transport: MailTransport; tokenSecret: string; baseUrl: string; messageIdDomain: string }> = {},
+  ) {
+    this.notifier = new Notifier(repo, {
+      transport: options.transport ?? new DryRunTransport(),
+      tokenSecret: options.tokenSecret ?? '',
+      baseUrl: options.baseUrl ?? 'http://localhost:3000',
+      messageIdDomain: options.messageIdDomain ?? 'booking.example.test',
+    })
+  }
 
   now(): Date {
     return new Date(Date.now() + this.offsetDays * MS_PER_DAY)
@@ -96,7 +116,7 @@ export class StudentService {
       nextFollowupAllowedAt: addDays(now, (await this.repo.getConfig()).followupWaitDays).toISOString(),
       followupCount: 0,
       urgencyFollowupUsed: false,
-      rootMessageId: null,
+      rootMessageId: this.notifier.rootIdFor(id),
       previousRequestId,
       decisionReason: null,
       routeConfirmed: path.routeConfirmed,
@@ -120,6 +140,7 @@ export class StudentService {
     await this.repo.insertRequest(request, steps)
     await this.log(id, 'created', actor.email, 'Request created')
     await this.log(id, previousRequestId ? 'resubmitted' : 'submitted', actor.email, previousRequestId ? `Resubmitted from ${previousRequestId}` : `Sent to ${steps[0]?.role ?? 'an office'}`)
+    await this.notifyOffice('submitted', request, steps[0], 1, { previousRequestId })
     return this.getDetail(actor, id)
   }
 
@@ -164,6 +185,8 @@ export class StudentService {
     if (!this.owned(request, actor)) return fail(404, 'Request not found.')
     const claim = await this.repo.claimFollowup(id, this.now(), actor.email)
     if (!claim.ok) return fail(409, 'A reminder cannot be sent now.', { reason: claim.result.reason, unlockAt: claim.result.unlockAt })
+    const steps = await this.repo.getSteps(id)
+    await this.notifyOffice('followup', claim.request, steps.find((x) => x.state === 'current'), claim.request.followupCount)
     return this.getDetail(actor, id)
   }
 
@@ -177,6 +200,8 @@ export class StudentService {
       const ok = await this.repo.updateRequest({ ...request, status: 'cancelled', version: request.version + 1, updatedAt: at })
       if (!ok) return fail(409, 'This request changed. Reload and try again.')
       await this.log(id, 'cancelled', actor.email, 'Request cancelled')
+      const open = (await this.repo.getSteps(id)).find((x) => x.state === 'current')
+      await this.notifyStudent('cancelled', { ...request, status: 'cancelled' }, open?.role ?? null, 1)
       return this.getDetail(actor, id)
     } finally {
       release()
@@ -234,7 +259,14 @@ export class StudentService {
       }
       if (!(await this.repo.updateRequest(updated, next))) return fail(409, 'This request changed. Reload and try again.')
       const type = input.decision === 'approve' ? 'step_approved' : input.decision === 'reject' ? 'step_rejected' : 'comment'
-      await this.log(id, type, input.by, input.decision === 'comment' ? input.reason : `${current.role}: ${input.decision === 'approve' ? 'approved' : 'not approved'}`)
+      const offline = input.decision !== 'comment' && input.offline ? ' (decided offline)' : ''
+      await this.log(id, type, input.by, input.decision === 'comment' ? input.reason : `${current.role}: ${input.decision === 'approve' ? 'approved' : 'not approved'}${offline}`)
+      if (input.decision === 'reject') await this.notifyStudent('not_approved', updated, current.role, 1, { role: current.role, reason: input.reason })
+      else if (input.decision === 'approve') {
+        const following = next.find((x) => x.state === 'current')
+        if (following) await this.notifyOffice('forwarded', updated, following, following.position + 1)
+        else await this.notifyStudent('approved', updated, current.role, 1)
+      }
       const detail = await this.repo.getRequest(id)
       if (!detail) return fail(404, 'Request not found.')
       return this.getDetail({ organisationId: detail.organisationId, organisationName: detail.organisationName, email: detail.submittedBy }, id)
@@ -273,9 +305,126 @@ export class StudentService {
           detail,
           key: `${type}:${request.id}:${anchor.toISOString()}`,
         }
-        if (await this.repo.appendEvent(event)) written.push(event)
+        if (await this.repo.appendEvent(event)) {
+          written.push(event)
+          await this.emailForJob(type, request)
+        }
       }
     }
+    await this.drainOutbox()
     return written
+  }
+
+  /* ---------------- Email ---------------- */
+
+  private async emailForJob(type: RequestEvent['type'], request: StudentRequest): Promise<void> {
+    const step = (await this.repo.getSteps(request.id)).find((x) => x.state === 'current')
+    if (!step) return
+    const activity = (await this.repo.listEvents(request.id)).filter((e) => e.type === 'step_approved' || e.type === 'step_rejected' || e.type === 'comment').length + 1
+    const now = this.now()
+    if (type === 'reminder_due') await this.notifyOffice('reminder', request, step, activity)
+    else if (type === 'escalated') {
+      await this.notifier.queue({ template: 'escalation', request, now, to: resolveBackup(step.role), cc: [request.submittedBy], sequence: activity, approveFor: { stepId: step.id, role: step.role }, context: { role: step.role } })
+    } else if (type === 'admin_flagged') {
+      await this.notifier.queue({ template: 'admin_flag', request, now, to: ADMIN_MAILBOX, sequence: activity, context: { role: step.role } })
+    }
+  }
+
+  /** An email to the office whose turn it is, with the student copied and a one-time approve link. */
+  private async notifyOffice(template: EmailTemplate, request: StudentRequest, step: ApprovalStepRecord | undefined, sequence: number, extra: { previousRequestId?: string | null } = {}): Promise<void> {
+    if (!step) return
+    const now = this.now()
+    await this.notifier.queue({
+      template,
+      request,
+      now,
+      to: resolveRecipient(step.role, now).email,
+      cc: [request.submittedBy],
+      sequence,
+      approveFor: { stepId: step.id, role: step.role },
+      context: { role: step.role, ...extra },
+    })
+    await this.drainOutbox()
+  }
+
+  /** An email to the club, with the office that acted copied. */
+  private async notifyStudent(template: EmailTemplate, request: StudentRequest, officeRole: string | null, sequence: number, context: { role?: string; reason?: string } = {}): Promise<void> {
+    const now = this.now()
+    await this.notifier.queue({
+      template,
+      request,
+      now,
+      to: request.submittedBy,
+      cc: officeRole ? [resolveRecipient(officeRole, now).email] : [],
+      sequence,
+      context: { role: officeRole ?? undefined, ...context },
+    })
+    await this.drainOutbox()
+  }
+
+  /** Sends what is due. Never throws, so an email problem cannot undo a status change. */
+  async drainOutbox(): Promise<{ sent: number; failed: number; suppressed: number }> {
+    try {
+      return await this.notifier.drain(this.now())
+    } catch {
+      return { sent: 0, failed: 0, suppressed: 0 }
+    }
+  }
+
+  get mailTransport(): string {
+    return this.notifier.transportName
+  }
+
+  async listEmails(actor: StudentActor, id: string): Promise<Result<OutboxRow[]>> {
+    const request = await this.repo.getRequest(id)
+    if (!this.owned(request, actor)) return fail(404, 'Request not found.')
+    return { ok: true, data: await this.repo.listOutbox(id) }
+  }
+
+  /** From a bounce or complaint report. That address gets no more mail. */
+  async recordBounce(email: string, kind: 'bounce' | 'complaint'): Promise<void> {
+    await this.repo.addSuppression({ email, reason: kind, at: this.now().toISOString() })
+  }
+
+  private async checkToken(token: string, secret: string) {
+    const verified = verifyToken(token, secret, this.now())
+    if (!verified.ok) return { ok: false as const, problem: verified.problem as TokenProblem }
+    const { payload } = verified
+    const record = await this.repo.getToken(payload.jti)
+    if (!record || record.requestId !== payload.r || record.stepId !== payload.s || record.role !== payload.role) return { ok: false as const, problem: 'invalid' as TokenProblem }
+    if (record.usedAt !== null) return { ok: false as const, problem: 'used' as TokenProblem }
+    const request = await this.repo.getRequest(payload.r)
+    const steps = request ? await this.repo.getSteps(request.id) : []
+    const step = steps.find((x) => x.id === payload.s)
+    if (!request || request.status !== 'pending' || !step || step.state !== 'current' || step.role !== payload.role) return { ok: false as const, problem: 'wrong_stage' as TokenProblem }
+    return { ok: true as const, payload, request, steps }
+  }
+
+  private tokenFailure(problem: TokenProblem) {
+    const text: Record<TokenProblem, string> = {
+      invalid: 'This link is not valid.',
+      expired: 'This link has expired. Ask the club to send a reminder, or use the booking portal.',
+      used: 'This link was already used.',
+      wrong_stage: 'This request is no longer waiting for your office.',
+    }
+    return fail(problem === 'invalid' ? 403 : 409, text[problem], { reason: problem })
+  }
+
+  /** What the confirmation page shows. Read only: opening a link never changes anything. */
+  async previewApproval(token: string, secret: string): Promise<Result<ApprovalSummary>> {
+    const checked = await this.checkToken(token, secret)
+    if (!checked.ok) return this.tokenFailure(checked.problem)
+    const after = checked.steps.filter((x) => x.position > (checked.steps.find((y) => y.id === checked.payload.s)?.position ?? -1)).map((x) => x.role)
+    return { ok: true, data: { request: checked.request, role: checked.payload.role, expiresAt: new Date(checked.payload.exp).toISOString(), remainingRoles: after } }
+  }
+
+  /** The POST behind the confirmation page. The token is spent first and only once, then the decision runs. */
+  async actViaToken(token: string, secret: string, decision: 'approve' | 'reject', reason?: string): Promise<Result<RequestDetail>> {
+    const checked = await this.checkToken(token, secret)
+    if (!checked.ok) return this.tokenFailure(checked.problem)
+    if (decision === 'reject' && !reason?.trim()) return fail(400, 'A reason is needed to not approve a request.')
+    if (!(await this.repo.consumeToken(checked.payload.jti, this.now()))) return this.tokenFailure('used')
+    const by = `${checked.payload.role} (email link)`
+    return decision === 'approve' ? this.recordDecision(checked.request.id, { decision, by }) : this.recordDecision(checked.request.id, { decision, by, reason: reason ?? '' })
   }
 }

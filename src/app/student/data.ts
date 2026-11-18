@@ -1,4 +1,4 @@
-import type { BookingConfig, RouteRule, StudentVenue } from './types'
+import type { BookingConfig, DirectoryEntry, RouteRule, StudentVenue } from './types'
 
 /** Defaults to agree with the offices. Change them here or in the admin config table, never in logic. */
 export const DEFAULT_CONFIG: BookingConfig = {
@@ -89,3 +89,16 @@ export const STUDENT_VENUES: StudentVenue[] = [
   { id: 'residence-hall', label: 'Residence Hall', capacity: null },
   { id: 'sports-block', label: 'Sports Block', capacity: null },
 ]
+
+/** Where each role's mail goes. Sample addresses on a reserved test domain. Admin editable later. */
+export const ADMIN_MAILBOX = 'booking-admin@example.test'
+
+export const ROLE_DIRECTORY: Record<string, DirectoryEntry> = {
+  'Student Life Office': { mailbox: 'slo@example.test', backup: 'slo-backup@example.test' },
+  'Additional review': { mailbox: 'review@example.test', backup: 'review-backup@example.test' },
+  'Office of Academic Affairs': { mailbox: 'oaa@example.test', backup: 'oaa-backup@example.test' },
+  'Performing Arts department manager': { mailbox: 'performing-arts@example.test' },
+  'Owning department': { mailbox: 'slo@example.test' },
+  'Security office': { mailbox: 'security@example.test' },
+  'Director, Student Life Office': { mailbox: 'slo-director@example.test' },
+}

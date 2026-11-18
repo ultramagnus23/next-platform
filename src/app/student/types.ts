@@ -216,6 +216,74 @@ export interface NewRequestInput {
 }
 
 export type DecisionInput =
-  | { decision: 'approve'; by: string }
-  | { decision: 'reject'; by: string; reason: string }
+  | { decision: 'approve'; by: string; offline?: boolean }
+  | { decision: 'reject'; by: string; reason: string; offline?: boolean }
   | { decision: 'comment'; by: string; reason: string }
+
+/* ------------------------------------------------------------------ */
+/* Email (M3)                                                          */
+/* ------------------------------------------------------------------ */
+
+export type EmailTemplate = 'submitted' | 'forwarded' | 'approved' | 'not_approved' | 'followup' | 'cancelled' | 'reminder' | 'escalation' | 'admin_flag'
+
+export type OutboxStatus = 'queued' | 'sending' | 'sent' | 'suppressed' | 'dead'
+
+export interface OutboxRow {
+  id: string
+  requestId: string
+  template: EmailTemplate
+  /** Position within (request, template, recipient). Part of the unique key. */
+  sequence: number
+  to: string
+  cc: string[]
+  subject: string
+  text: string
+  messageId: string
+  inReplyTo: string | null
+  references: string[]
+  /** Passed to the provider so a retry never sends twice. */
+  idempotencyKey: string
+  status: OutboxStatus
+  attempts: number
+  nextAttemptAt: string
+  /** A claimed row is invisible to other workers until this time. */
+  lockedUntil: string | null
+  lastError: string | null
+  providerId: string | null
+  createdAt: string
+  sentAt: string | null
+}
+
+export interface Suppression {
+  email: string
+  reason: 'bounce' | 'complaint' | 'manual'
+  at: string
+}
+
+export interface ApprovalToken {
+  jti: string
+  requestId: string
+  stepId: string
+  role: string
+  expiresAt: string
+  usedAt: string | null
+}
+
+export type TokenProblem = 'invalid' | 'expired' | 'used' | 'wrong_stage'
+
+export interface ApprovalSummary {
+  request: StudentRequest
+  role: string
+  expiresAt: string
+  /** Offices still to come after this one, so the approver sees the whole path. */
+  remainingRoles: string[]
+}
+
+export interface DirectoryEntry {
+  mailbox: string
+  /** The person who normally handles it. Optional. */
+  assignee?: { email: string; leave?: { from: string; to: string } }
+  /** Covers the assignee while on leave. */
+  delegate?: string
+  backup?: string
+}
