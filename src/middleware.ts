@@ -28,7 +28,7 @@ export default auth(async function middleware(req) {
   }
 
   // Public sandbox: no sign-in for the booking portal. Each visitor gets a private id in a cookie.
-  if (isSandbox() && (pathname === '/admin' || pathname.startsWith('/admin/bookings') || pathname.startsWith('/api/admin/bookings'))) {
+  if (isSandbox() && (pathname === '/admin' || pathname.startsWith('/admin/bookings') || pathname.startsWith('/api/admin/bookings') || pathname.startsWith('/student') || pathname.startsWith('/api/student'))) {
     const existing = req.cookies.get('booking_sandbox_id')?.value
     const id = existing && /^[a-z0-9]{16,64}$/.test(existing) ? existing : crypto.randomUUID().replace(/-/g, '')
     const forwarded = new Headers(req.headers)

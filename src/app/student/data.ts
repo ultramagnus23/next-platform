@@ -1,4 +1,4 @@
-import type { BookingConfig, RouteRule } from './types'
+import type { BookingConfig, RouteRule, StudentVenue } from './types'
 
 /** Defaults to agree with the offices. Change them here or in the admin config table, never in logic. */
 export const DEFAULT_CONFIG: BookingConfig = {
@@ -73,4 +73,19 @@ export const ROUTE_RULES: RouteRule[] = [
     maxBookingDaysPerSemester: null,
     guestSpeakerStage: null,
   },
+]
+
+/**
+ * Venues the student form offers. Only the three critical-space capacities come from public documents.
+ * Everything else is null and shown as "to confirm with the office". Where the Multi-Purpose Hall sits is
+ * also unconfirmed, so no building is listed.
+ */
+export const STUDENT_VENUES: StudentVenue[] = [
+  { id: 'dr-reddys-auditorium', label: "Dr. Reddy's Auditorium", capacity: 500 },
+  { id: 'takshila', label: 'AC 02 LH 011 Takshila', capacity: 200 },
+  { id: 'multi-purpose-hall', label: 'Multi-Purpose Hall', capacity: 400 },
+  { id: 'black-box-theatre', label: 'Black Box Theatre', capacity: null },
+  { id: 'dance-studio', label: 'Dance Studio', capacity: null },
+  { id: 'residence-hall', label: 'Residence Hall', capacity: null },
+  { id: 'sports-block', label: 'Sports Block', capacity: null },
 ]

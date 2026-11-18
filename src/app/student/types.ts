@@ -90,3 +90,132 @@ export interface ApprovalPath {
   routeConfirmed: boolean
   flags: PathFlag[]
 }
+
+/* ------------------------------------------------------------------ */
+/* Stored records (M2)                                                 */
+/* ------------------------------------------------------------------ */
+
+export interface StudentRequest {
+  id: string
+  organisationId: string
+  organisationName: string
+  submittedBy: string
+  eventName: string
+  description: string
+  category: CategoryId
+  venueId: string
+  venueLabel: string
+  /** IST date, YYYY-MM-DD. */
+  date: string
+  startMin: number
+  endMin: number
+  attendance: number
+  needsAv: boolean
+  guestSpeaker: boolean
+  status: StoredStatus
+  submittedAt: string | null
+  lastApproverActivityAt: string | null
+  lastFollowupAt: string | null
+  /** Mirror of the window end, kept in step by the repository. The rule itself is in logic/followup.ts. */
+  nextFollowupAllowedAt: string | null
+  followupCount: number
+  urgencyFollowupUsed: boolean
+  /** Set when the first email goes out (M3). Every later email threads under it. */
+  rootMessageId: string | null
+  /** The rejected request this one resubmits, if any. */
+  previousRequestId: string | null
+  /** The office's reason when rejected, shown in full to the student. */
+  decisionReason: string | null
+  routeConfirmed: boolean
+  routeVersion: number
+  /** Bumped on every write. A stale write is refused. */
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ApprovalStepRecord {
+  id: string
+  requestId: string
+  position: number
+  role: string
+  why: string
+  confirmed: boolean
+  state: StepState
+  decidedAt: string | null
+  decidedBy: string | null
+  reason: string | null
+}
+
+export type EventType =
+  | 'created'
+  | 'submitted'
+  | 'step_approved'
+  | 'step_rejected'
+  | 'comment'
+  | 'followup_sent'
+  | 'cancelled'
+  | 'resubmitted'
+  | 'reminder_due'
+  | 'escalated'
+  | 'admin_flagged'
+
+/** Append only. Nothing edits or deletes a row. */
+export interface RequestEvent {
+  id: string
+  requestId: string
+  type: EventType
+  at: string
+  actor: string
+  detail: string
+  /** Set on scheduler events so a rerun never writes the same event twice. */
+  key: string | null
+}
+
+export interface StudentVenue {
+  id: string
+  label: string
+  /** Null where no source gives a capacity. */
+  capacity: number | null
+}
+
+export interface StudentActor {
+  organisationId: string
+  organisationName: string
+  email: string
+}
+
+export type Failure = { ok: false; code: 400 | 403 | 404 | 409; error: string; reason?: string; unlockAt?: string | null }
+export type Result<T> = { ok: true; data: T } | Failure
+
+export interface RequestDetail {
+  request: StudentRequest
+  status: import('./logic/status').DerivedStatus
+  steps: ApprovalStepRecord[]
+  events: RequestEvent[]
+  followup: import('./logic/followup').FollowupResult
+}
+
+export interface RequestListRow {
+  request: StudentRequest
+  status: import('./logic/status').DerivedStatus
+  currentRole: string | null
+}
+
+export interface NewRequestInput {
+  eventName: string
+  description: string
+  category: CategoryId
+  venueId: string
+  date: string
+  startMin: number
+  endMin: number
+  attendance: number
+  needsAv: boolean
+  guestSpeaker: boolean
+}
+
+export type DecisionInput =
+  | { decision: 'approve'; by: string }
+  | { decision: 'reject'; by: string; reason: string }
+  | { decision: 'comment'; by: string; reason: string }

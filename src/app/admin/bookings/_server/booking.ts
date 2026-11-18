@@ -22,8 +22,8 @@ type Holder = typeof globalThis & {
   [VISITORS_KEY]?: Map<string, { service: BookingService; last: number }>
 }
 
-const MAX_VISITORS = Math.max(1, Number(process.env.SANDBOX_MAX_VISITORS) || 40)
-const TTL_MS = Math.max(1, Number(process.env.SANDBOX_TTL_MINUTES) || 90) * 60_000
+export const MAX_VISITORS = Math.max(1, Number(process.env.SANDBOX_MAX_VISITORS) || 40)
+export const TTL_MS = Math.max(1, Number(process.env.SANDBOX_TTL_MINUTES) || 90) * 60_000
 
 function shared(): BookingService {
   const holder = globalThis as Holder
@@ -34,7 +34,7 @@ function shared(): BookingService {
   return created
 }
 
-async function visitorId(): Promise<string | null> {
+export async function visitorId(): Promise<string | null> {
   try {
     const fromHeader = (await headers()).get('x-sandbox-id')
     if (fromHeader) return fromHeader
