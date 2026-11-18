@@ -52,3 +52,8 @@ ds-bundle/
 .env
 # Key names for contributors; never put values here
 !.env.example
+
+# Playwright output
+/e2e-output/
+/test-results/
+/playwright-report/
