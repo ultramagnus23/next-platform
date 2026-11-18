@@ -15,17 +15,17 @@ export default async function ApprovePage({ params }: { params: Promise<{ token:
 
   if (!result.ok) {
     return (
-      <main className="mx-auto grid max-w-xl gap-3 p-4">
+      <div className="grid max-w-xl gap-3">
         <h1 className="text-2xl font-semibold">This link cannot be used</h1>
         <p role="alert">{result.error}</p>
         <p className="text-sm text-muted-foreground">Nothing was changed.</p>
-      </main>
+      </div>
     )
   }
 
   const { request, role, remainingRoles } = result.data
   return (
-    <main className="mx-auto grid max-w-xl gap-4 p-4">
+    <div className="grid max-w-xl gap-4">
       <header>
         <p className="text-sm text-muted-foreground">Decision for {role}</p>
         <h1 className="text-2xl font-semibold">{request.eventName}</h1>
@@ -45,6 +45,6 @@ export default async function ApprovePage({ params }: { params: Promise<{ token:
         <dd>{remainingRoles.length > 0 ? remainingRoles.join(', ') : 'Nobody. Your decision is the last one.'}</dd>
       </dl>
       <ApproveForm token={token} />
-    </main>
+    </div>
   )
 }

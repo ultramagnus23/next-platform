@@ -19,7 +19,7 @@ import type {
   StoredStatus,
   StudentRequest,
 } from '../types'
-import { addDays, eventInstant, latestOf, MS_PER_DAY } from '../utils'
+import { addDays, eventInstant, istDateOf, latestOf, MS_PER_DAY } from '../utils'
 import { resolveBackup, resolveRecipient } from './email/directory'
 import { Notifier } from './email/notifier'
 import { DryRunTransport, type MailTransport } from './email/transport'
@@ -53,6 +53,15 @@ export class StudentService {
 
   now(): Date {
     return new Date(Date.now() + this.offsetDays * MS_PER_DAY)
+  }
+
+  /** Today's date in IST, YYYY-MM-DD. */
+  today(): string {
+    return istDateOf(this.now())
+  }
+
+  async getConfig() {
+    return this.repo.getConfig()
   }
 
   advanceDays(days: number): { now: string; offsetDays: number } {

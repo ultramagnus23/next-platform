@@ -58,3 +58,8 @@ export function formatInstant(iso: string): string {
   const date = shifted.toISOString().slice(0, 10)
   return `${formatDay(date)}, ${formatTime(shifted.getUTCHours() * 60 + shifted.getUTCMinutes())}`
 }
+
+/** "18:30" for a time input, from minutes after midnight. */
+export function minToTime(min: number): string {
+  return `${String(Math.floor(min / 60) % 24).padStart(2, '0')}:${String(min % 60).padStart(2, '0')}`
+}

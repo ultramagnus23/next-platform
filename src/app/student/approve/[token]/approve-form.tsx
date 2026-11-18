@@ -1,8 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
 
 type Phase = 'choose' | 'reason' | 'sending' | 'done'
 
@@ -58,27 +56,27 @@ export function ApproveForm({ token }: { token: string }) {
       {phase === 'reason' && (
         <label className="grid gap-1 text-sm">
           <span className="font-medium">Reason for not approving</span>
-          <Textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={4} aria-required="true" />
+          <textarea className="s-field min-h-28" value={reason} onChange={(e) => setReason(e.target.value)} rows={4} aria-required="true" />
         </label>
       )}
       <div className="flex flex-wrap gap-2">
         {phase !== 'reason' && (
-          <Button className="min-h-11" disabled={phase === 'sending'} onClick={() => send('approve')}>
+          <button type="button" className="s-btn" disabled={phase === 'sending'} onClick={() => send('approve')}>
             Approve this request
-          </Button>
+          </button>
         )}
         {phase === 'choose' || phase === 'sending' ? (
-          <Button className="min-h-11" variant="outline" disabled={phase === 'sending'} onClick={() => setPhase('reason')}>
+          <button type="button" className="s-btn s-btn--quiet" disabled={phase === 'sending'} onClick={() => setPhase('reason')}>
             Do not approve
-          </Button>
+          </button>
         ) : (
           <>
-            <Button className="min-h-11" variant="destructive" onClick={() => send('reject')}>
+            <button type="button" className="s-btn" onClick={() => send('reject')}>
               Send reason and do not approve
-            </Button>
-            <Button className="min-h-11" variant="ghost" onClick={() => setPhase('choose')}>
+            </button>
+            <button type="button" className="s-btn s-btn--quiet" onClick={() => setPhase('choose')}>
               Go back
-            </Button>
+            </button>
           </>
         )}
       </div>
