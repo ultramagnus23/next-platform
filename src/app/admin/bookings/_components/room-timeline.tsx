@@ -1,6 +1,9 @@
+'use client'
+
 import { cn } from '@/lib/utils'
 import type { TimelineBlock, TimelineKind } from '../types'
 import { formatClock, formatCompactRange } from '../utils'
+import { EventPopover } from './event-popover'
 
 interface RoomTimelineProps {
   blocks: TimelineBlock[]
@@ -54,21 +57,31 @@ export function RoomTimeline({ blocks, highlightId, startHour = 8, endHour = 23,
               const right = Math.min(((b.endMin - from) / span) * 100, 100)
               const mine = highlightId !== undefined && b.requestId === highlightId
               const label = `${b.label}, ${formatCompactRange(b.startMin, b.endMin)}, ${mine ? 'this request' : KIND_LABEL[b.kind]}${b.inClash ? ', in a clash' : ''}`
+              const others = blocks.filter((o) => o.id !== b.id && o.startMin < b.endMin && o.endMin > b.startMin)
               return (
-                <div
+                <EventPopover
                   key={b.id}
-                  role="img"
-                  aria-label={label}
-                  title={label}
-                  className={cn(
-                    'absolute top-1 flex h-9 items-center overflow-hidden rounded border px-1.5 text-xs font-medium',
-                    mine ? 'border-primary bg-primary text-white' : KIND_STYLE[b.kind],
-                    !mine && b.inClash && 'border-red-600 bg-red-50 text-red-950 dark:bg-red-950/40 dark:text-red-100',
-                  )}
-                  style={{ left: `${left}%`, width: `${Math.max(right - left, 1)}%` }}
+                  title={b.label}
+                  status={mine ? 'This request' : KIND_LABEL[b.kind]}
+                  lines={[formatCompactRange(b.startMin, b.endMin)]}
+                  inClash={b.inClash}
+                  overlaps={others.map((o) => ({ id: o.id, label: o.label, when: formatCompactRange(o.startMin, o.endMin), kind: KIND_LABEL[o.kind] }))}
+                  href={b.requestId && !mine ? `/admin/bookings/requests/${b.requestId}` : null}
                 >
-                  <span className="truncate">{b.label}</span>
-                </div>
+                  <button
+                    type="button"
+                    aria-label={label}
+                    title={label}
+                    className={cn(
+                      'absolute top-1 flex h-9 items-center overflow-hidden rounded border px-1.5 text-xs font-medium',
+                      mine ? 'border-primary bg-primary text-white' : KIND_STYLE[b.kind],
+                      !mine && b.inClash && 'border-red-600 bg-red-50 text-red-950 dark:bg-red-950/40 dark:text-red-100',
+                    )}
+                    style={{ left: `${left}%`, width: `${Math.max(right - left, 1)}%` }}
+                  >
+                    <span className="truncate">{b.label}</span>
+                  </button>
+                </EventPopover>
               )
             })}
           </div>

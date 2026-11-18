@@ -3,9 +3,9 @@
 import Link from 'next/link'
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import type { RoomDayRow, TimelineBlock } from '../types'
 import { formatClock, formatCompactRange } from '../utils'
+import { EventPopover } from './event-popover'
 import { SIMULATE_EVENT, SimulateDialog, type SimulateOptions } from './simulate-dialog'
 
 const START = 8 * 60
@@ -153,37 +153,17 @@ interface EventBlockProps {
 /** One event on the grid. Click it for a popup with the detail and what it clashes with. */
 function EventBlock({ block, others, label, cls, style }: EventBlockProps) {
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button type="button" title={label} aria-label={label} className={cls} style={style} onClick={(e) => e.stopPropagation()}>
-          <span className="truncate">{block.label}</span>
-        </button>
-      </PopoverTrigger>
-      <PopoverContent className="w-72 text-sm" onClick={(e) => e.stopPropagation()}>
-        <p className="font-semibold">{block.label}</p>
-        <p className="text-muted-foreground">
-          {formatCompactRange(block.startMin, block.endMin)} · {KIND_WORD[block.kind]}
-        </p>
-        {others.length > 0 ? (
-          <div className="mt-2">
-            <p className="font-medium text-[#b3261e] dark:text-red-300">{block.inClash ? 'Clashes with' : 'Overlaps with'}</p>
-            <ul className="mt-1 grid gap-1">
-              {others.map((o) => (
-                <li key={o.id}>
-                  {o.label} <span className="text-muted-foreground">({formatCompactRange(o.startMin, o.endMin)}, {KIND_WORD[o.kind]})</span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        ) : (
-          <p className="mt-2 text-muted-foreground">Nothing else is in this room at that time.</p>
-        )}
-        {block.requestId && (
-          <Link href={`/admin/bookings/requests/${block.requestId}`} className="mt-3 inline-block underline">
-            Open the request
-          </Link>
-        )}
-      </PopoverContent>
-    </Popover>
+    <EventPopover
+      title={block.label}
+      status={KIND_WORD[block.kind]}
+      lines={[formatCompactRange(block.startMin, block.endMin)]}
+      inClash={block.inClash}
+      overlaps={others.map((o) => ({ id: o.id, label: o.label, when: formatCompactRange(o.startMin, o.endMin), kind: KIND_WORD[o.kind] }))}
+      href={block.requestId ? `/admin/bookings/requests/${block.requestId}` : null}
+    >
+      <button type="button" title={label} aria-label={label} className={cls} style={style} onClick={(e) => e.stopPropagation()}>
+        <span className="truncate">{block.label}</span>
+      </button>
+    </EventPopover>
   )
 }

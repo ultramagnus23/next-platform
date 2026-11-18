@@ -1,5 +1,5 @@
-import Link from 'next/link'
 import { redirect } from 'next/navigation'
+import { AgendaRowItem } from '../_components/agenda-row'
 import { ParamSelect } from '../_components/param-select'
 import { resolveActor } from '../_server/actor'
 import { getBookingService } from '../_server/booking'
@@ -87,19 +87,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Pro
             <ul className="divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
               {list.map((r) => (
                 <li key={r.request.id}>
-                  <Link href={`/admin/bookings/requests/${r.request.id}`} className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2 hover:bg-accent/50">
-                    <span className="min-w-0">
-                      <span className="block truncate text-sm font-medium">{r.request.eventName}</span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {r.organisationName} · {r.categoryLabel}
-                      </span>
-                    </span>
-                    <span className="min-w-0 text-xs">
-                      <span className="block truncate">{r.roomLabel}</span>
-                      <span className="block text-muted-foreground">{formatCompactRange(r.request.startMin, r.request.endMin)}</span>
-                    </span>
-                    <span className="whitespace-nowrap rounded-full border border-border px-2 py-0.5 text-xs">{r.request.status === 'pending' ? 'Waiting' : statusLabel(r.request.status)}</span>
-                  </Link>
+                  <AgendaRowItem row={r} statusText={r.request.status === 'pending' ? 'Waiting' : statusLabel(r.request.status)} />
                 </li>
               ))}
             </ul>
