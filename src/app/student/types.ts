@@ -17,6 +17,8 @@ export interface ApprovalStep {
 /** Every number the rules depend on. Lives in data, never as a literal in logic. */
 export interface BookingConfig {
   followupWaitDays: number
+  /** Days of quiet before a pending request is shown as taking longer than usual. */
+  stagnantAfterDays: number
   approverReminderDay: number
   escalationDay: number
   adminFlagDay: number

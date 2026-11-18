@@ -25,7 +25,7 @@ export interface Bridge {
   mirror(actor: StudentActor, input: NewRequestInput): Promise<{ ok: true; adminId: string } | { ok: false; error: string }>
   view(adminId: string): Promise<AdminView | null>
   decide(adminId: string, decision: 'approve' | 'reject', reason?: string): Promise<BridgeResult>
-  withdraw(adminId: string): Promise<void>
+  withdraw(adminId: string): Promise<BridgeResult>
   note(adminId: string, text: string): Promise<void>
   advanceDays(days: number): Promise<void>
 }
@@ -59,7 +59,8 @@ function statusOf(admin: BookingRequest['status']): AdminView['status'] {
   return 'cancelled'
 }
 
-const APPROVAL_ACTIONS = new Set(['forwarded', 'confirmed', 'auto_approved', 'override_confirmed'])
+// An automatic clearance by rule is not an office approving, so it is not listed here.
+const APPROVAL_ACTIONS = new Set(['forwarded', 'confirmed', 'override_confirmed'])
 
 export class AdminBridge implements Bridge {
   constructor(private readonly getAdmin: () => Promise<BookingService>) {}
@@ -137,11 +138,14 @@ export class AdminBridge implements Bridge {
     return result.ok ? { ok: true } : { ok: false, error: result.error }
   }
 
-  async withdraw(adminId: string): Promise<void> {
+  async withdraw(adminId: string): Promise<BridgeResult> {
     const admin = await this.getAdmin()
     const detail = await admin.getRequestDetail(seedSuperAdmin(), adminId)
-    if (!detail.ok || (detail.data.request.status !== 'pending' && detail.data.request.status !== 'changes_requested')) return
-    await admin.performAction(seedSuperAdmin(), adminId, { action: 'reject', version: detail.data.request.version, reason: WITHDRAWN_TEXT })
+    if (!detail.ok) return { ok: false, error: detail.error }
+    const status = detail.data.request.status
+    if (status !== 'pending' && status !== 'changes_requested') return { ok: false, error: 'An office already decided this request, so it cannot be cancelled here.' }
+    const result = await admin.performAction(seedSuperAdmin(), adminId, { action: 'reject', version: detail.data.request.version, reason: WITHDRAWN_TEXT })
+    return result.ok ? { ok: true } : { ok: false, error: result.error }
   }
 
   async note(adminId: string, text: string): Promise<void> {

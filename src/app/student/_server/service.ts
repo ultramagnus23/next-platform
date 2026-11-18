@@ -28,8 +28,6 @@ import { clockOf } from './repo/memory'
 import type { StudentRepository } from './repo/repository'
 import { verifyToken } from './tokens'
 
-const APPROVED_ACTIONS = new Set(['confirmed', 'auto_approved', 'override_confirmed'])
-
 const fail = (code: 400 | 403 | 404 | 409, error: string, extra: { reason?: string; unlockAt?: string | null } = {}) => ({ ok: false as const, code, error, ...extra })
 
 /**
@@ -181,7 +179,14 @@ export class StudentService {
   async getDetail(actor: StudentActor, id: string): Promise<Result<RequestDetail>> {
     const stored = await this.repo.getRequest(id)
     if (!this.owned(stored, actor)) return fail(404, 'Request not found.')
-    const request = await this.syncFromAdmin(stored)
+    await this.sync(stored)
+    return this.detailUnlocked(actor, id)
+  }
+
+  /** Reads one request as it is stored. Never takes the lock, so it is safe inside a locked section. */
+  private async detailUnlocked(actor: StudentActor, id: string): Promise<Result<RequestDetail>> {
+    const request = await this.repo.getRequest(id)
+    if (!this.owned(request, actor)) return fail(404, 'Request not found.')
     const config = await this.repo.getConfig()
     const now = this.now()
     return {
@@ -202,7 +207,7 @@ export class StudentService {
     const now = this.now()
     const rows: RequestListRow[] = []
     for (const stored of await this.repo.listRequests(actor.organisationId)) {
-      const request = await this.syncFromAdmin(stored)
+      const request = await this.sync(stored)
       const steps = await this.repo.getSteps(request.id)
       rows.push({ request, status: deriveStatus(request, config, now), currentRole: steps.find((s) => s.state === 'current')?.role ?? null })
     }
@@ -213,11 +218,20 @@ export class StudentService {
 
   /** The follow-up. The rule is enforced inside the repository's single atomic update, never here. */
   async sendFollowup(actor: StudentActor, id: string): Promise<Result<RequestDetail>> {
-    const stored = await this.repo.getRequest(id)
-    if (!this.owned(stored, actor)) return fail(404, 'Request not found.')
-    // Read what the office did first, so activity there restarts the window before the rule is checked.
-    await this.syncFromAdmin(stored)
-    const claim = await this.repo.claimFollowup(id, this.now(), actor.email)
+    const first = await this.repo.getRequest(id)
+    if (!this.owned(first, actor)) return fail(404, 'Request not found.')
+    // Under the same lock as decisions, so a reminder can never make a decision lose its version check.
+    const release = await this.mutex.acquire([id])
+    let claim
+    try {
+      const stored = await this.repo.getRequest(id)
+      if (!this.owned(stored, actor)) return fail(404, 'Request not found.')
+      // Read what the office did first, so activity there restarts the window before the rule is checked.
+      await this.syncUnlocked(stored)
+      claim = await this.repo.claimFollowup(id, this.now(), actor.email)
+    } finally {
+      release()
+    }
     if (!claim.ok) return fail(409, 'A reminder cannot be sent now.', { reason: claim.result.reason, unlockAt: claim.result.unlockAt })
     if (claim.request.adminRequestId && this.bridge) await this.bridge.note(claim.request.adminRequestId, 'The club sent a reminder.').catch(() => undefined)
     const steps = await this.repo.getSteps(id)
@@ -228,17 +242,22 @@ export class StudentService {
   async cancel(actor: StudentActor, id: string): Promise<Result<RequestDetail>> {
     const release = await this.mutex.acquire([id])
     try {
-      const request = await this.repo.getRequest(id)
-      if (!this.owned(request, actor)) return fail(404, 'Request not found.')
-      if (request.status !== 'pending' && request.status !== 'draft') return fail(409, 'Only a request that is waiting can be cancelled.')
+      const stored = await this.repo.getRequest(id)
+      if (!this.owned(stored, actor)) return fail(404, 'Request not found.')
+      // The office may have decided since the page was loaded. Look first, so a decision is never lost.
+      const request = await this.syncUnlocked(stored)
+      if (request.status !== 'pending' && request.status !== 'draft') return fail(409, 'Only a request that is waiting can be cancelled. An office may have just decided it.')
+      if (request.adminRequestId && this.bridge) {
+        const withdrawn = await this.bridge.withdraw(request.adminRequestId)
+        if (!withdrawn.ok) return fail(409, withdrawn.error)
+      }
       const at = this.now().toISOString()
       const ok = await this.repo.updateRequest({ ...request, status: 'cancelled', version: request.version + 1, updatedAt: at })
       if (!ok) return fail(409, 'This request changed. Reload and try again.')
       await this.log(id, 'cancelled', actor.email, 'Request cancelled')
-      if (request.adminRequestId && this.bridge) await this.bridge.withdraw(request.adminRequestId).catch(() => undefined)
       const open = (await this.repo.getSteps(id)).find((x) => x.state === 'current')
       await this.notifyStudent('cancelled', { ...request, status: 'cancelled' }, open?.role ?? null, 1)
-      return this.getDetail(actor, id)
+      return this.detailUnlocked(actor, id)
     } finally {
       release()
     }
@@ -249,6 +268,8 @@ export class StudentService {
     const previous = await this.repo.getRequest(id)
     if (!this.owned(previous, actor)) return fail(404, 'Request not found.')
     if (previous.status !== 'rejected') return fail(409, 'Only a request that was not approved can be resubmitted.')
+    const children = await this.repo.listRequests(actor.organisationId)
+    if (children.some((c) => c.previousRequestId === id && c.status !== 'cancelled' && c.status !== 'rejected')) return fail(409, 'This request was already resubmitted.')
     const result = await this.submit(actor, input, id)
     if (result.ok) await this.log(id, 'resubmitted', actor.email, `Resubmitted as ${result.data.request.id}`)
     return result
@@ -258,23 +279,35 @@ export class StudentService {
    * An office decides or comments. Stands in for the admin portal until the two are joined. Any call
    * restarts the follow-up window. A rejection needs a reason and closes the request at once.
    */
-  async recordDecision(id: string, input: DecisionInput): Promise<Result<RequestDetail>> {
+  async recordDecision(id: string, input: DecisionInput, guard?: { stepId: string; role: string; jti: string }): Promise<Result<RequestDetail>> {
     const release = await this.mutex.acquire([id])
     try {
       const stored = await this.repo.getRequest(id)
       if (!stored) return fail(404, 'Request not found.')
-      const request = await this.syncFromAdmin(stored)
+      const request = await this.syncUnlocked(stored)
       if (request.status !== 'pending') return fail(409, 'This request is no longer waiting for a decision.')
+      if (guard) {
+        // An email link may only act on the stage it was made for, checked now, after reading the office's
+        // latest action, and the link is spent only if the decision goes through.
+        const live = (await this.repo.getSteps(id)).find((x) => x.state === 'current')
+        if (!live || live.id !== guard.stepId || live.role !== guard.role) return this.tokenFailure('wrong_stage')
+        const record = await this.repo.getToken(guard.jti)
+        if (!record || record.usedAt !== null) return this.tokenFailure('used')
+      }
+      const spend = async () => {
+        if (guard) await this.repo.consumeToken(guard.jti, this.now())
+      }
       if (request.adminRequestId && this.bridge) {
         if (input.decision === 'comment') await this.bridge.note(request.adminRequestId, input.reason)
         else {
           const done = await this.bridge.decide(request.adminRequestId, input.decision, input.decision === 'reject' ? input.reason : undefined)
           if (!done.ok) return fail(input.decision === 'reject' && !input.reason.trim() ? 400 : 409, done.error)
         }
+        await spend()
         const synced = await this.repo.getRequest(id)
         if (!synced) return fail(404, 'Request not found.')
-        await this.syncFromAdmin(synced)
-        return this.getDetail({ organisationId: synced.organisationId, organisationName: synced.organisationName, email: synced.submittedBy }, id)
+        await this.syncUnlocked(synced)
+        return this.detailUnlocked({ organisationId: synced.organisationId, organisationName: synced.organisationName, email: synced.submittedBy }, id)
       }
       const steps = await this.repo.getSteps(id)
       const current = steps.find((s) => s.state === 'current')
@@ -315,9 +348,10 @@ export class StudentService {
         if (following) await this.notifyOffice('forwarded', updated, following, following.position + 1)
         else await this.notifyStudent('approved', updated, current.role, 1)
       }
+      await spend()
       const detail = await this.repo.getRequest(id)
       if (!detail) return fail(404, 'Request not found.')
-      return this.getDetail({ organisationId: detail.organisationId, organisationName: detail.organisationName, email: detail.submittedBy }, id)
+      return this.detailUnlocked({ organisationId: detail.organisationId, organisationName: detail.organisationName, email: detail.submittedBy }, id)
     } finally {
       release()
     }
@@ -332,7 +366,9 @@ export class StudentService {
     const config = await this.repo.getConfig()
     const now = this.now()
     const written: RequestEvent[] = []
-    for (const request of await this.repo.listRequests()) {
+    for (const stored of await this.repo.listRequests()) {
+      // An office may have decided in the admin portal. Look first, so a finished request gets no reminders.
+      const request = await this.sync(stored)
       if (request.status !== 'pending') continue
       const anchor = latestOf([request.submittedAt, request.lastApproverActivityAt])
       if (!anchor) continue
@@ -370,7 +406,19 @@ export class StudentService {
    * chain, copies the office's actions into the activity log once each (keyed by the admin log id), moves
    * the status, and sends the matching emails once. A request the club cancelled stays cancelled.
    */
-  private async syncFromAdmin(request: StudentRequest): Promise<StudentRequest> {
+  private async sync(request: StudentRequest): Promise<StudentRequest> {
+    if (!this.bridge || !request.adminRequestId) return request
+    const release = await this.mutex.acquire([request.id])
+    try {
+      const fresh = await this.repo.getRequest(request.id)
+      return fresh ? await this.syncUnlocked(fresh) : request
+    } finally {
+      release()
+    }
+  }
+
+  /** The sync itself. Call it only while holding this request's lock. */
+  private async syncUnlocked(request: StudentRequest): Promise<StudentRequest> {
     if (!this.bridge || !request.adminRequestId || request.status === 'cancelled') return request
     const view = await this.bridge.view(request.adminRequestId)
     if (!view) return request
@@ -390,14 +438,12 @@ export class StudentService {
       reason: stage.state === 'rejected' ? view.reason : null,
     }))
 
-    const written: Array<{ action: string; position: number }> = []
-    const actions: Record<string, RequestEvent['type']> = { forwarded: 'step_approved', confirmed: 'step_approved', auto_approved: 'step_approved', override_confirmed: 'step_approved', rejected: 'step_rejected' }
+    const actions: Record<string, RequestEvent['type']> = { forwarded: 'step_approved', confirmed: 'step_approved', override_confirmed: 'step_approved', rejected: 'step_rejected' }
     for (const log of view.logs) {
       if (log.action === 'submitted' || log.action === 'auto_checked' || log.action === 'resubmitted') continue
       const type = actions[log.action] ?? 'comment'
       const detail = `${log.stageLabel ?? 'The office'}: ${log.action.replace(/_/g, ' ')}${log.reason ? `. ${log.reason}` : ''}`
-      const fresh = await this.repo.appendEvent({ id: this.repo.nextId('ev'), requestId: request.id, type, at: log.at, actor: log.actorEmail, detail, key: `admin:${log.id}` })
-      if (fresh) written.push({ action: log.action, position: steps.filter((x) => x.state === 'approved').length })
+      await this.repo.appendEvent({ id: this.repo.nextId('ev'), requestId: request.id, type, at: log.at, actor: log.actorEmail, detail, key: `admin:${log.id}` })
     }
 
     const changed =
@@ -405,7 +451,10 @@ export class StudentService {
       view.lastApproverActivityAt !== request.lastApproverActivityAt ||
       view.reason !== request.decisionReason ||
       JSON.stringify(steps.map((x) => [x.role, x.state])) !== JSON.stringify(before.map((x) => [x.role, x.state]))
-    if (!changed) return request
+    if (!changed) {
+      await this.emailsForSync(request, steps, view.logs)
+      return request
+    }
 
     const at = this.now()
     const updated: StudentRequest = {
@@ -419,14 +468,26 @@ export class StudentService {
     }
     if (!(await this.repo.updateRequest(updated, steps))) return (await this.repo.getRequest(request.id)) ?? request
 
-    for (const w of written) {
-      if (w.action === 'rejected') await this.notifyStudent('not_approved', updated, steps.find((x) => x.state === 'rejected')?.role ?? null, 1, { role: steps.find((x) => x.state === 'rejected')?.role, reason: view.reason ?? undefined })
-      else if (w.action === 'forwarded') {
-        const next = steps.find((x) => x.state === 'current')
-        if (next) await this.notifyOffice('forwarded', updated, next, next.position + 1)
-      } else if (APPROVED_ACTIONS.has(w.action)) await this.notifyStudent('approved', updated, steps.at(-1)?.role ?? null, 1)
-    }
+    await this.emailsForSync(updated, steps, view.logs)
     return updated
+  }
+
+  /**
+   * Emails for what the office did, worked out from the admin log every time and deduplicated by the outbox
+   * key, so a sync that lost a race still sends them on the next read, and never twice.
+   */
+  private async emailsForSync(request: StudentRequest, steps: ApprovalStepRecord[], logs: Array<{ action: string; at: string }>): Promise<void> {
+    const approvals = logs.filter((l) => l.action === 'forwarded' || l.action === 'confirmed' || l.action === 'override_confirmed').sort((a, b) => a.at.localeCompare(b.at))
+    for (const [i, log] of approvals.entries()) {
+      if (log.action === 'forwarded') {
+        const next = steps[i + 1]
+        if (next && next.state === 'current') await this.notifyOffice('forwarded', request, next, next.position + 1)
+      } else if (request.status === 'approved') await this.notifyStudent('approved', request, steps.at(-1)?.role ?? null, 1)
+    }
+    if (request.status === 'rejected') {
+      const rejected = steps.find((x) => x.state === 'rejected')
+      await this.notifyStudent('not_approved', request, rejected?.role ?? null, 1, { role: rejected?.role, reason: request.decisionReason ?? undefined })
+    }
   }
 
   /* ---------------- Email ---------------- */
@@ -438,13 +499,16 @@ export class StudentService {
     const now = this.now()
     if (type === 'reminder_due') await this.notifyOffice('reminder', request, step, activity)
     else if (type === 'escalated') {
-      await this.notifier.queue({ template: 'escalation', request, now, to: resolveBackup(step.role), cc: [request.submittedBy], sequence: activity, approveFor: { stepId: step.id, role: step.role }, context: { role: step.role } })
+      await this.notifier.queue({ template: 'escalation', request, now, to: resolveBackup(step.role), cc: [], sequence: activity, approveFor: { stepId: step.id, role: step.role }, context: { role: step.role } })
     } else if (type === 'admin_flagged') {
       await this.notifier.queue({ template: 'admin_flag', request, now, to: ADMIN_MAILBOX, sequence: activity, context: { role: step.role } })
     }
   }
 
-  /** An email to the office whose turn it is, with the student copied and a one-time approve link. */
+  /**
+   * An email to the office whose turn it is, with a one-time approve link. The club is never copied on it,
+   * because the link would let the club approve its own request. The club gets its own copy with no link.
+   */
   private async notifyOffice(template: EmailTemplate, request: StudentRequest, step: ApprovalStepRecord | undefined, sequence: number, extra: { previousRequestId?: string | null } = {}): Promise<void> {
     if (!step) return
     const now = this.now()
@@ -453,11 +517,12 @@ export class StudentService {
       request,
       now,
       to: resolveRecipient(step.role, now).email,
-      cc: [request.submittedBy],
+      cc: [],
       sequence,
       approveFor: { stepId: step.id, role: step.role },
       context: { role: step.role, ...extra },
     })
+    await this.notifier.queue({ template, request, now, to: request.submittedBy, cc: [], sequence, context: { role: step.role, forClub: true, ...extra } })
     await this.drainOutbox()
   }
 
@@ -489,10 +554,16 @@ export class StudentService {
     return this.notifier.transportName
   }
 
-  async listEmails(actor: StudentActor, id: string): Promise<Result<OutboxRow[]>> {
+  /** The emails for a request. Approve links are hidden from the club unless demo mode asks to show them. */
+  async listEmails(actor: StudentActor, id: string, revealLinks = false): Promise<Result<OutboxRow[]>> {
     const request = await this.repo.getRequest(id)
     if (!this.owned(request, actor)) return fail(404, 'Request not found.')
-    return { ok: true, data: await this.repo.listOutbox(id) }
+    const rows = (await this.repo.listOutbox(id)).map((r) => ({
+      ...r,
+      idempotencyKey: '',
+      text: revealLinks ? r.text : r.text.replace(/https?:\/\/\S*\/student\/approve\/\S+/g, '[approve link sent to the office only]'),
+    }))
+    return { ok: true, data: rows }
   }
 
   /** From a bounce or complaint report. That address gets no more mail. */
@@ -532,13 +603,13 @@ export class StudentService {
     return { ok: true, data: { request: checked.request, role: checked.payload.role, expiresAt: new Date(checked.payload.exp).toISOString(), remainingRoles: after } }
   }
 
-  /** The POST behind the confirmation page. The token is spent first and only once, then the decision runs. */
+  /** The POST behind the confirmation page. The link is spent only if the decision goes through. */
   async actViaToken(token: string, secret: string, decision: 'approve' | 'reject', reason?: string): Promise<Result<RequestDetail>> {
     const checked = await this.checkToken(token, secret)
     if (!checked.ok) return this.tokenFailure(checked.problem)
     if (decision === 'reject' && !reason?.trim()) return fail(400, 'A reason is needed to not approve a request.')
-    if (!(await this.repo.consumeToken(checked.payload.jti, this.now()))) return this.tokenFailure('used')
     const by = `${checked.payload.role} (email link)`
-    return decision === 'approve' ? this.recordDecision(checked.request.id, { decision, by }) : this.recordDecision(checked.request.id, { decision, by, reason: reason ?? '' })
+    const guard = { stepId: checked.payload.s, role: checked.payload.role, jti: checked.payload.jti }
+    return decision === 'approve' ? this.recordDecision(checked.request.id, { decision, by }, guard) : this.recordDecision(checked.request.id, { decision, by, reason: reason ?? '' }, guard)
   }
 }

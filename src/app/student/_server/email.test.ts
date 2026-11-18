@@ -33,6 +33,9 @@ async function setup(transport: MailTransport = new DryRunTransport()) {
   return { repo, service, id: created.data.request.id, transport }
 }
 
+/** The emails meant for an office. The club gets its own copy of each, with no approve link. */
+const officeOnly = <T extends { text: string }>(rows: T[]) => rows.filter((r) => !r.text.includes('The office has been emailed'))
+
 function linkOf(text: string): string {
   const match = text.match(/https:\/\/example\.test\/student\/approve\/([\w.-]+)/)
   if (!match?.[1]) throw new Error('no approve link in email')
@@ -45,7 +48,7 @@ describe('threading', () => {
     await service.recordDecision(id, { decision: 'approve', by: 'slo' })
     await service.recordDecision(id, { decision: 'approve', by: 'review' })
     service.advanceDays(1)
-    const rows = await repo.listOutbox(id)
+    const rows = officeOnly(await repo.listOutbox(id))
     expect(rows.map((r) => r.template)).toEqual(['submitted', 'forwarded', 'approved'])
     const [root, ...rest] = rows
     expect(root?.inReplyTo).toBeNull()
@@ -62,7 +65,7 @@ describe('threading', () => {
     service.advanceDays(8)
     await service.sendFollowup(ACTOR, id)
     await service.recordDecision(id, { decision: 'reject', by: 'slo', reason: 'Booked.' })
-    const rows = await repo.listOutbox(id)
+    const rows = officeOnly(await repo.listOutbox(id))
     expect(rows.map((r) => r.template)).toEqual(['submitted', 'followup', 'not_approved'])
     expect(rows.slice(1).every((r) => r.inReplyTo === rows[0]?.messageId)).toBe(true)
   })
@@ -80,8 +83,9 @@ describe('dry run and sending', () => {
   it('prints and records every email and sends nothing real', async () => {
     const dry = new DryRunTransport()
     const { id, repo } = await setup(dry)
-    expect(dry.sent).toHaveLength(1)
-    expect((await repo.listOutbox(id))[0]?.status).toBe('sent')
+    // One email to the office and one copy for the club.
+    expect(dry.sent).toHaveLength(2)
+    expect((await repo.listOutbox(id)).every((r) => r.status === 'sent')).toBe(true)
     expect(dry.name).toBe('dry-run')
   })
 
@@ -98,8 +102,9 @@ describe('outbox idempotency and retry', () => {
     const { repo, id } = await setup()
     const [row] = await repo.listOutbox(id)
     if (!row) throw new Error('no row')
+    const before = (await repo.listOutbox(id)).length
     expect(await repo.enqueueOutbox({ ...row, id: 'ob-dup' })).toBe(false)
-    expect(await repo.listOutbox(id)).toHaveLength(1)
+    expect(await repo.listOutbox(id)).toHaveLength(before)
   })
 
   it('retries a failed send with backoff and does not send twice once it works', async () => {
@@ -128,8 +133,9 @@ describe('outbox idempotency and retry', () => {
     await service.drainOutbox()
     ;[row] = await repo.listOutbox(id)
     expect(row).toMatchObject({ status: 'sent', providerId: 'provider-1' })
-    expect(received).toHaveLength(1)
-    expect(received[0]?.idempotencyKey).toBe(row?.idempotencyKey)
+    const toOffice = received.filter((m) => m.to === 'slo@example.test')
+    expect(toOffice).toHaveLength(1)
+    expect(toOffice[0]?.idempotencyKey).toBe(row?.idempotencyKey)
   })
 
   it('gives up after the maximum attempts', async () => {
@@ -319,7 +325,7 @@ describe('scheduler emails', () => {
     service.advanceDays(9)
     await service.tick()
     await service.tick()
-    const rows = await repo.listOutbox(id)
+    const rows = officeOnly(await repo.listOutbox(id))
     expect(rows.map((r) => r.template)).toEqual(['submitted', 'reminder', 'escalation', 'admin_flag'])
     expect(rows.find((r) => r.template === 'escalation')?.to).toBe('slo-backup@example.test')
     expect(rows.slice(1).every((r) => r.inReplyTo === rows[0]?.messageId)).toBe(true)
@@ -342,5 +348,65 @@ describe('mark as decided', () => {
     if (!r.ok) throw new Error(r.error)
     expect(r.data.events.at(-1)?.detail).toContain('decided offline')
     expect(r.data.steps[0]?.state).toBe('approved')
+  })
+})
+
+describe('review fixes', () => {
+  it('never puts an approve link in anything the club receives', async () => {
+    const { service, id, repo } = await setup()
+    service.advanceDays(8)
+    await service.sendFollowup(ACTOR, id)
+    for (const row of await repo.listOutbox(id)) {
+      if (row.to === 'lead@example.test') expect(row.text).not.toContain('/student/approve/')
+      expect(row.cc).not.toContain('lead@example.test')
+    }
+  })
+
+  it('hides approve links from the club in the emails list, and shows them only when asked', async () => {
+    const { service, id } = await setup()
+    const hidden = await service.listEmails(ACTOR, id)
+    const shown = await service.listEmails(ACTOR, id, true)
+    if (!hidden.ok || !shown.ok) throw new Error('list failed')
+    expect(hidden.data.some((r) => r.text.includes('/student/approve/'))).toBe(false)
+    expect(hidden.data.every((r) => r.idempotencyKey === '')).toBe(true)
+    expect(shown.data.some((r) => r.text.includes('/student/approve/'))).toBe(true)
+  })
+
+  it('does not spend the link when the decision fails, so it can be used again', async () => {
+    const { service, id, repo } = await setup()
+    const mail = (await repo.listOutbox(id)).find((r) => r.template === 'submitted')
+    const token = linkOf(mail?.text ?? '')
+    expect(await service.actViaToken(token, SECRET, 'reject', '  ')).toMatchObject({ ok: false, code: 400 })
+    const again = await service.actViaToken(token, SECRET, 'approve')
+    expect(again.ok).toBe(true)
+  })
+
+  it('refuses a second link for the same stage once the first one decided', async () => {
+    const { service, id, repo } = await setup()
+    service.advanceDays(2)
+    await service.tick()
+    const rows = await repo.listOutbox(id)
+    const links = rows.filter((r) => r.text.includes('/student/approve/')).map((r) => linkOf(r.text))
+    expect(links.length).toBeGreaterThanOrEqual(2)
+    const results = await Promise.all(links.slice(0, 2).map((t) => service.actViaToken(t, SECRET, 'approve')))
+    expect(results.filter((r) => r.ok)).toHaveLength(1)
+    const detail = await service.getDetail(ACTOR, id)
+    expect(detail.ok && detail.data.steps.map((x) => x.state)).toEqual(['approved', 'current'])
+  })
+
+  it('skips a finished request in the scheduler', async () => {
+    const { service, id, repo } = await setup()
+    await service.recordDecision(id, { decision: 'reject', by: 'slo', reason: 'Booked already.' })
+    const before = (await repo.listOutbox(id)).length
+    service.advanceDays(20)
+    await service.tick()
+    expect((await repo.listOutbox(id)).length).toBe(before)
+  })
+
+  it('refuses to resubmit the same request twice', async () => {
+    const { service, id } = await setup()
+    await service.recordDecision(id, { decision: 'reject', by: 'slo', reason: 'Wrong date.' })
+    expect((await service.resubmit(ACTOR, id, input(service))).ok).toBe(true)
+    expect(await service.resubmit(ACTOR, id, input(service))).toMatchObject({ ok: false, code: 409 })
   })
 })

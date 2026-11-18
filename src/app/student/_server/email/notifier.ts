@@ -65,7 +65,7 @@ export class Notifier {
     const approveUrl = args.approveFor ? await this.approveUrl(request, args.approveFor, now) : null
     const { subject, text } = renderEmail(template, { request, role: args.approveFor?.role, ...args.context, approveUrl })
 
-    const isRoot = template === 'submitted' && sequence === 1
+    const isRoot = template === 'submitted' && sequence === 1 && !args.context?.forClub
     const root = this.rootIdFor(request.id)
     const row: OutboxRow = {
       id: this.repo.nextId('ob'),

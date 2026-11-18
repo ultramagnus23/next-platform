@@ -1,3 +1,4 @@
+import { isDemoMode } from '@/app/admin/bookings/_server/offices'
 import { getStudentService } from '@/app/student/_server/student'
 import { authorise, fail, fromResult } from '../../../helper'
 
@@ -9,7 +10,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     const gate = await authorise()
     if ('response' in gate) return gate.response
     const { id } = await params
-    return fromResult(await (await getStudentService()).listEmails(gate.actor, id))
+    return fromResult(await (await getStudentService()).listEmails(gate.actor, id, isDemoMode()))
   } catch (err) {
     platform.error('GET /api/student/requests/[id]/emails error:', err)
     return fail(500, 'Internal server error')

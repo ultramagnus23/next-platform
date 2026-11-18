@@ -77,7 +77,7 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
       {request.status === 'cancelled' && (
         <section aria-labelledby="outcome" className="grid gap-1 rounded-xl border border-[var(--s-line-strong)] bg-[var(--s-raised)] p-4">
           <h2 id="outcome">Cancelled</h2>
-          <p>You cancelled this request. No office is waiting on it.</p>
+          <p>This request was cancelled. No office is waiting on it.</p>
         </section>
       )}
 
@@ -87,7 +87,7 @@ export default async function RequestPage({ params }: { params: Promise<{ id: st
         </p>
       )}
 
-      {pending && <FollowupPanel requestId={request.id} role={current?.role ?? null} followup={followup} waitDays={config.followupWaitDays} eventDate={request.date} />}
+      {pending && <FollowupPanel requestId={request.id} role={current?.role ?? null} followup={followup} waitDays={config.followupWaitDays} urgencyDays={config.urgencyDays} eventDate={request.date} />}
 
       <section aria-labelledby="path-title" className="grid gap-3 border-t border-[var(--s-line)] pt-4">
         <h2 id="path-title">Where it stands</h2>

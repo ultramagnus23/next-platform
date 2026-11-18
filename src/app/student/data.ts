@@ -3,6 +3,7 @@ import type { BookingConfig, DirectoryEntry, RouteRule, StudentVenue } from './t
 /** Defaults to agree with the offices. Change them here or in the admin config table, never in logic. */
 export const DEFAULT_CONFIG: BookingConfig = {
   followupWaitDays: 7,
+  stagnantAfterDays: 7,
   approverReminderDay: 2,
   escalationDay: 5,
   adminFlagDay: 14,

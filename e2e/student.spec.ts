@@ -33,10 +33,10 @@ async function fillStepOne(page: Page, name: string) {
 async function createRequest(page: Page, name = 'Pitch demo event') {
   await page.goto('/student/new')
   await fillStepOne(page, name)
-  await page.getByRole('button', { name: 'Next' }).click()
-  await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByRole('button', { name: 'See the approval path' }).click()
+  await page.getByRole('button', { name: 'Continue to details' }).click()
   await page.getByLabel('How many people are coming?').fill('100')
-  await page.getByRole('button', { name: 'Next' }).click()
+  await page.getByRole('button', { name: 'Review your request' }).click()
   await page.getByRole('button', { name: 'Send request' }).click()
   await page.waitForURL(/\/student\/requests\/sr-\d+/)
 }
@@ -58,21 +58,21 @@ test.describe('student portal', () => {
     await shot(page, info, 'new-1-what-and-when')
 
     // Errors first: nothing filled in.
-    await page.getByRole('button', { name: 'Next' }).click()
+    await page.getByRole('button', { name: 'See the approval path' }).click()
     await expect(alertWith(page, 'Fix these to go on')).toBeVisible()
     await axe(page, 'new request step 1 with errors')
     await shot(page, info, 'new-1-errors')
 
     await fillStepOne(page, 'Pitch demo event')
-    await page.getByRole('button', { name: 'Next' }).click()
+    await page.getByRole('button', { name: 'See the approval path' }).click()
     await expect(page.getByRole('heading', { name: 'Approval path' }).last()).toBeFocused()
     await expect(page.getByRole('list', { name: 'Approval path' }).getByRole('listitem')).toHaveCount(2)
     await axe(page, 'new request step 2')
     await shot(page, info, 'new-2-path')
 
-    await page.getByRole('button', { name: 'Next' }).click()
+    await page.getByRole('button', { name: 'Continue to details' }).click()
     await page.getByLabel('How many people are coming?').fill('700')
-    await page.getByRole('button', { name: 'Next' }).click()
+    await page.getByRole('button', { name: 'Review your request' }).click()
     await expect(alertWith(page, 'seats 500')).toBeVisible()
     await axe(page, 'new request step 3 with a field error')
     await page.getByLabel('How many people are coming?').fill('100')
@@ -87,7 +87,7 @@ test.describe('student portal', () => {
     await shot(page, info, 'new-3-details')
     await axe(page, 'new request step 3')
 
-    await page.getByRole('button', { name: 'Next' }).click()
+    await page.getByRole('button', { name: 'Review your request' }).click()
     await axe(page, 'new request step 4')
     await shot(page, info, 'new-4-review')
     await page.getByRole('button', { name: 'Send request' }).click()
@@ -165,7 +165,7 @@ test.describe('student portal', () => {
     const before = await (await page.request.get('/api/student/requests/sr-1')).json()
     expect(before.data.request.status).toBe('pending')
     await page.getByRole('button', { name: 'Do not approve' }).click()
-    await expect(page.getByLabel('Reason for not approving')).toBeVisible()
+    await expect(page.getByLabel('Reason for not approving')).toBeFocused()
     await axe(page, 'approve link page, reason step')
   })
 
@@ -180,12 +180,12 @@ test.describe('student portal', () => {
     await expect(page.getByRole('radio', { name: /Dr\. Reddy/ })).toBeChecked()
     await page.getByLabel('Date').focus()
     await page.keyboard.type(inDays(40).split('-').reverse().join(''))
-    await page.getByRole('button', { name: 'Next' }).focus()
+    await page.getByRole('button', { name: 'See the approval path' }).focus()
     await page.keyboard.press('Enter')
     await expect(page.getByRole('heading', { name: 'Approval path' }).last()).toBeFocused()
     // Every interactive thing shows a visible focus ring.
-    await page.getByRole('button', { name: 'Back' }).focus()
-    const outline = await page.getByRole('button', { name: 'Back' }).evaluate((el) => getComputedStyle(el).outlineStyle)
+    await page.getByRole('button', { name: /^Back to/ }).focus()
+    const outline = await page.getByRole('button', { name: /^Back to/ }).evaluate((el) => getComputedStyle(el).outlineStyle)
     expect(outline).not.toBe('none')
   })
 

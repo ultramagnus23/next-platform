@@ -30,12 +30,24 @@ async function build(): Promise<StudentService> {
   return service
 }
 
+function shared(holder: Holder): Promise<StudentService> {
+  const existing = holder[SHARED_KEY]
+  if (existing) return existing
+  const created = build().catch((err: unknown) => {
+    // Do not remember a failed build, or every later request fails the same way.
+    holder[SHARED_KEY] = undefined
+    throw err
+  })
+  holder[SHARED_KEY] = created
+  return created
+}
+
 export async function getStudentService(): Promise<StudentService> {
   const holder = globalThis as Holder
-  if (!isSandbox()) return (holder[SHARED_KEY] ??= build())
+  if (!isSandbox()) return shared(holder)
 
   const id = await visitorId()
-  if (!id) return (holder[SHARED_KEY] ??= build())
+  if (!id) return shared(holder)
   const visitors = (holder[VISITORS_KEY] ??= new Map())
   const now = Date.now()
   for (const [key, entry] of visitors) if (now - entry.last > TTL_MS) visitors.delete(key)

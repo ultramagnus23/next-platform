@@ -10,6 +10,8 @@ interface FollowupPanelProps {
   role: string | null
   followup: FollowupResult
   waitDays: number
+  /** Days before the event that allow one early reminder. */
+  urgencyDays: number
   /** The event date, so the urgency explanation can name it. */
   eventDate: string
 }
@@ -29,7 +31,7 @@ function lockedText(reason: FollowupReason, unlockAt: string | null, waitDays: n
  * date as text, not a tooltip, and uses aria-disabled so it stays in the tab order. The server decides:
  * if it refuses, the reason and unlock date it sends back are shown here.
  */
-export function FollowupPanel({ requestId, role, followup, waitDays, eventDate }: FollowupPanelProps) {
+export function FollowupPanel({ requestId, role, followup, waitDays, urgencyDays, eventDate }: FollowupPanelProps) {
   const router = useRouter()
   const [phase, setPhase] = useState<Phase>('idle')
   const [sentAt, setSentAt] = useState<string | null>(null)
@@ -94,7 +96,7 @@ export function FollowupPanel({ requestId, role, followup, waitDays, eventDate }
         ) : locked ? (
           <p>{lockedText(reason, unlockAt, waitDays)}</p>
         ) : followup.urgencyOverride ? (
-          <p>Your event is on {formatDay(eventDate)}, less than {waitDays} days away, so you can send one early reminder now.</p>
+          <p>Your event is on {formatDay(eventDate)}, less than {urgencyDays} days away, so you can send one early reminder now.</p>
         ) : (
           <p>The office gets a reminder email and you are copied. You can send one every {waitDays} days.</p>
         )}

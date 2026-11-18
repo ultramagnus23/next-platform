@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 type Phase = 'choose' | 'reason' | 'sending' | 'done'
 
@@ -10,10 +10,17 @@ export function ApproveForm({ token }: { token: string }) {
   const [reason, setReason] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const reasonRef = useRef<HTMLTextAreaElement>(null)
+
+  // The button that was pressed disappears, so put focus where the person goes next.
+  useEffect(() => {
+    if (phase === 'reason') reasonRef.current?.focus()
+  }, [phase])
 
   async function send(decision: 'approve' | 'reject') {
     if (decision === 'reject' && !reason.trim()) {
       setError('Write a reason. The club sees it in full.')
+      reasonRef.current?.focus()
       return
     }
     setPhase('sending')
@@ -49,14 +56,14 @@ export function ApproveForm({ token }: { token: string }) {
   return (
     <div className="grid gap-3">
       {error && (
-        <p role="alert" className="text-sm text-[#b3261e]">
+        <p id="approve-error" role="alert" className="text-[var(--s-bad-fg)]">
           {error}
         </p>
       )}
       {phase === 'reason' && (
         <label className="grid gap-1 text-sm">
           <span className="font-medium">Reason for not approving</span>
-          <textarea className="s-field min-h-28" value={reason} onChange={(e) => setReason(e.target.value)} rows={4} aria-required="true" />
+          <textarea ref={reasonRef} className="s-field min-h-28" value={reason} onChange={(e) => setReason(e.target.value)} rows={4} required aria-invalid={error ? true : undefined} aria-describedby={error ? 'approve-error' : undefined} />
         </label>
       )}
       <div className="flex flex-wrap gap-2">

@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ApprovalPath, CategoryId, NewRequestInput } from '../types'
+import { AV_HOURS } from '../data'
 import { formatDay, formatTime } from '../utils'
 import { PathPreview } from './path-preview'
 
@@ -36,6 +37,7 @@ interface RequestFormProps {
 }
 
 const STEPS = ['What and when', 'Approval path', 'Details', 'Review and send'] as const
+const NEXT_LABEL = ['See the approval path', 'Continue to details', 'Review your request'] as const
 const DRAFT_KEY = 'student-request-draft-v1'
 const CATEGORIES: Array<{ id: CategoryId; label: string }> = [
   { id: 'extracurricular', label: 'Extra-curricular event' },
@@ -221,6 +223,7 @@ export function RequestForm({ venues, today, initial, resubmitOf }: RequestFormP
       const body = (await res.json()) as { success: boolean; error?: string; data?: { request: { id: string } } }
       if (!body.success || !body.data) {
         setSendError(body.error ?? 'The request was not sent.')
+        setSending(false)
         return
       }
       try {
@@ -229,11 +232,11 @@ export function RequestForm({ venues, today, initial, resubmitOf }: RequestFormP
         /* nothing to clear */
       }
       router.push(`/student/requests/${body.data.request.id}`)
+      return
     } catch {
       setSendError('The request could not be sent. Check your connection.')
-    } finally {
-      setSending(false)
     }
+    setSending(false)
   }
 
   const venue = venues.find((x) => x.id === v.venueId)
@@ -318,7 +321,7 @@ export function RequestForm({ venues, today, initial, resubmitOf }: RequestFormP
                 <span>
                   <span className="block font-semibold">{x.label}</span>
                   <span className="block text-[0.8125rem] text-[var(--s-muted)]">
-                    {x.capacity ? `Seats ${x.capacity}` : 'Capacity to confirm'} · IT and AV 8am to 8pm · Accessibility to confirm · {x.owner ? `Decided by ${x.owner}` : 'Office to confirm'}
+                    {x.capacity ? `Seats ${x.capacity}` : 'Capacity to confirm'} · IT and AV {formatTime(AV_HOURS.fromMin)} to {formatTime(AV_HOURS.toMin)} · Accessibility to confirm · {x.owner ? `Decided by ${x.owner}` : 'Office to confirm'}
                   </span>
                 </span>
               </label>
@@ -407,13 +410,21 @@ export function RequestForm({ venues, today, initial, resubmitOf }: RequestFormP
 
       <div className="flex flex-wrap items-center gap-2 border-t border-[var(--s-line)] pt-4">
         {step > 0 && (
-          <button type="button" className="s-btn s-btn--quiet" onClick={() => setStep((s) => s - 1)} disabled={sending}>
-            Back
+          <button
+            type="button"
+            className="s-btn s-btn--quiet"
+            onClick={() => {
+              setErrors({})
+              setStep((s) => s - 1)
+            }}
+            disabled={sending}
+          >
+            Back to {STEPS[step - 1]?.toLowerCase()}
           </button>
         )}
         {step < STEPS.length - 1 ? (
           <button type="button" className="s-btn" onClick={goNext}>
-            Next
+            {NEXT_LABEL[step]}
           </button>
         ) : (
           <button type="button" className="s-btn" onClick={send} aria-busy={sending} disabled={sending}>

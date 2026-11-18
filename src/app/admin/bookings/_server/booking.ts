@@ -37,8 +37,8 @@ function shared(): BookingService {
 export async function visitorId(): Promise<string | null> {
   try {
     const fromHeader = (await headers()).get('x-sandbox-id')
-    if (fromHeader) return fromHeader
-    return (await cookies()).get('booking_sandbox_id')?.value ?? null
+    const valid = (v: string | null | undefined) => (v && /^[a-z0-9]{16,64}$/.test(v) ? v : null)
+    return valid(fromHeader) ?? valid((await cookies()).get('booking_sandbox_id')?.value)
   } catch {
     // Outside a request, such as the start-up warm-up.
     return null

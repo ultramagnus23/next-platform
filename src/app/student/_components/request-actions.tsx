@@ -1,7 +1,7 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 /** Cancel with an inline confirmation, so a stray tap does not cancel a request. */
 export function CancelRequest({ requestId }: { requestId: string }) {
@@ -9,6 +9,11 @@ export function CancelRequest({ requestId }: { requestId: string }) {
   const [asking, setAsking] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const confirmRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (asking) confirmRef.current?.focus()
+  }, [asking])
 
   async function cancel() {
     setBusy(true)
@@ -36,7 +41,7 @@ export function CancelRequest({ requestId }: { requestId: string }) {
     )
   }
   return (
-    <div className="grid gap-2" role="group" aria-label="Confirm cancel">
+    <div ref={confirmRef} tabIndex={-1} className="grid gap-2 outline-none" role="group" aria-label="Confirm cancel">
       <p>Cancel this request? The offices on the path are told, and you cannot undo it.</p>
       {error && (
         <p role="alert" className="text-[var(--s-bad-fg)]">

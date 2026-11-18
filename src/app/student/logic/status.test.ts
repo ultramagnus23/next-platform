@@ -48,7 +48,7 @@ describe('deriveStatus', () => {
   })
 
   it('reads the wait from config', () => {
-    expect(deriveStatus(pending, { ...DEFAULT_CONFIG, followupWaitDays: 2 }, at(2 * DAY)).shown).toBe('taking_longer')
+    expect(deriveStatus(pending, { ...DEFAULT_CONFIG, stagnantAfterDays: 2 }, at(2 * DAY)).shown).toBe('taking_longer')
   })
 })
 

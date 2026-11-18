@@ -42,7 +42,7 @@ const TONE: Record<ShownStatus, StatusTone> = {
 
 /**
  * The word, icon and colour a student sees. "Taking longer than usual" is computed here and never stored:
- * the request is pending and the wait has reached followupWaitDays since the later of submission and the
+ * the request is pending and the wait has reached stagnantAfterDays since the later of submission and the
  * last approver activity. Nothing auto-approves.
  */
 export function deriveStatus(req: Pick<RequestClock, 'status' | 'submittedAt' | 'lastApproverActivityAt'>, config: BookingConfig, now: Date): DerivedStatus {
@@ -54,7 +54,7 @@ export function deriveStatus(req: Pick<RequestClock, 'status' | 'submittedAt' | 
     const anchor = latestOf([req.submittedAt, req.lastApproverActivityAt])
     if (anchor) {
       daysWaiting = Math.max(0, Math.floor((now.getTime() - anchor.getTime()) / MS_PER_DAY))
-      const since = addDays(anchor, config.followupWaitDays)
+      const since = addDays(anchor, config.stagnantAfterDays)
       if (now.getTime() >= since.getTime()) {
         stagnantSince = since.toISOString()
         shown = 'taking_longer'

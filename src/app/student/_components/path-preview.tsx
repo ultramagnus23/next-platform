@@ -1,11 +1,12 @@
 import { Clock } from 'lucide-react'
 import type { ApprovalPath, PathFlag } from '../types'
-import { formatDay, formatInstant, istDateOf } from '../utils'
+import { AV_HOURS } from '../data'
+import { formatDay, formatInstant, formatTime, istDateOf } from '../utils'
 
 const FLAG_TEXT: Partial<Record<PathFlag, string>> = {
   route_unconfirmed: 'Route unconfirmed, email SLO.',
   notice_unconfirmed: 'The notice this space needs is not confirmed yet. Ask the office how far ahead to book.',
-  av_outside_hours: 'IT and AV support runs 8am to 8pm. Your event runs outside those hours, so AV may not be available.',
+  av_outside_hours: `IT and AV support runs ${formatTime(AV_HOURS.fromMin)} to ${formatTime(AV_HOURS.toMin)}. Your event runs outside those hours, so AV may not be available.`,
   semester_cap_reached: 'Your club has used all the booking days this space allows this semester. The office may not approve more.',
 }
 

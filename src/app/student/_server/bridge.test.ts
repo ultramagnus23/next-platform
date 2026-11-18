@@ -45,8 +45,9 @@ class FakeBridge implements Bridge {
     this.calls.push(`decide:${decision}:${reason ?? ''}`)
     return { ok: true }
   }
-  async withdraw() {
+  async withdraw(): Promise<BridgeResult> {
     this.calls.push('withdraw')
+    return { ok: true }
   }
   async note(_id: string, text: string) {
     this.calls.push(`note:${text}`)
@@ -191,6 +192,49 @@ describe('actions from the student side', () => {
     const { bridge, service, id } = await linked()
     await service.recordDecision(id, { decision: 'reject', by: 'slo', reason: 'No room that evening.' })
     expect(bridge.calls).toContain('decide:reject:No room that evening.')
+  })
+})
+
+describe('cancel and sync races', () => {
+  const allApproved = (): AdminView => ({
+    ...pendingView(),
+    status: 'approved',
+    stages: pendingView().stages.map((x) => ({ ...x, state: 'approved' as const })),
+    lastApproverActivityAt: '2026-11-21T05:00:00.000Z',
+    logs: [log('l1', 'forwarded', '2026-11-20T05:00:00.000Z'), log('l2', 'confirmed', '2026-11-21T05:00:00.000Z')],
+  })
+
+  it('refuses to cancel when the office already decided, and loses nothing', async () => {
+    const { bridge, service, id } = await linked()
+    bridge.view_ = allApproved()
+    expect(await service.cancel(ACTOR, id)).toMatchObject({ ok: false, code: 409 })
+    expect(bridge.calls).not.toContain('withdraw')
+    const d = await service.getDetail(ACTOR, id)
+    expect(d.ok && d.data.request.status).toBe('approved')
+  })
+
+  it('does not mark a request cancelled when the admin portal refuses the withdrawal', async () => {
+    const { bridge, service, id } = await linked()
+    bridge.withdraw = async () => ({ ok: false, error: 'An office already decided this request, so it cannot be cancelled here.' })
+    expect(await service.cancel(ACTOR, id)).toMatchObject({ ok: false, code: 409 })
+    const d = await service.getDetail(ACTOR, id)
+    expect(d.ok && d.data.request.status).toBe('pending')
+  })
+
+  it('sends the approval email once, however often the request is read', async () => {
+    const { bridge, service, id, repo } = await linked()
+    bridge.view_ = allApproved()
+    await service.getDetail(ACTOR, id)
+    await service.getDetail(ACTOR, id)
+    expect((await repo.listOutbox(id)).filter((r) => r.template === 'approved')).toHaveLength(1)
+  })
+
+  it('does not treat an automatic clearance as an office approving', async () => {
+    const { bridge, service, id } = await linked()
+    bridge.view_ = { ...pendingView(), logs: [log('l1', 'auto_approved', '2026-11-20T05:00:00.000Z')] }
+    const d = await service.getDetail(ACTOR, id)
+    expect(d.ok && d.data.request.status).toBe('pending')
+    expect(d.ok && d.data.steps[0]?.state).toBe('current')
   })
 })
 

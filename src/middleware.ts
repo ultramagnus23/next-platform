@@ -24,10 +24,13 @@ export default auth(async function middleware(req) {
   if (limited) return limited
 
   // Approve links from emails: the signed token in the URL is the credential, checked by the route itself.
-  const approveLink = pathname.startsWith('/student/approve/') || pathname.startsWith('/api/student/approve/')
+  const approveLink = pathname.startsWith('/student/approve/') || pathname.startsWith('/api/student/approve/') || pathname === '/api/student/tick'
 
   if (PUBLIC_PATHS.includes(pathname) || approveLink || pathname.startsWith('/_next/') || pathname.startsWith('/favicon.ico')) {
-    return NextResponse.next()
+    // Never trust a sandbox id sent by the client. Only the branch below may set it.
+    const clean = new Headers(req.headers)
+    clean.delete('x-sandbox-id')
+    return NextResponse.next({ request: { headers: clean } })
   }
 
   // Public sandbox: no sign-in for the booking portal. Each visitor gets a private id in a cookie.
