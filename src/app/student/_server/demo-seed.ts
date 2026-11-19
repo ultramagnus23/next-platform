@@ -46,7 +46,7 @@ export async function seedStudentDemo(service: StudentService): Promise<void> {
   }
 
   await service.advanceClock(-5)
-  const debate = await service.submit(DEMO_ACTOR, base({ eventName: 'Open debate night', venueId: 'multi-purpose-hall', attendance: 300, date: dateFrom(service, 16) }))
+  const debate = await service.submit(DEMO_ACTOR, base({ eventName: 'Open debate night', venueId: 'multi-purpose-hall', attendance: 150, date: dateFrom(service, 16) }))
   await service.advanceClock(5)
   if (debate.ok) {
     await service.recordDecision(debate.data.request.id, {

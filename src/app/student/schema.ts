@@ -40,3 +40,14 @@ export const decisionSchema = z.discriminatedUnion('decision', [
 ])
 
 export const advanceSchema = z.object({ days: z.number().int().min(1).max(60) }).strict()
+
+export const roomsQuerySchema = z
+  .object({
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isRealDate, 'Choose a real date.'),
+    from: z.coerce.number().int().min(0).max(1439),
+    to: z.coerce.number().int().min(1).max(1440),
+    seats: z.coerce.number().int().min(0).max(5000).optional(),
+    needs: z.string().max(200).optional(),
+    building: z.string().max(80).optional(),
+  })
+  .strict()

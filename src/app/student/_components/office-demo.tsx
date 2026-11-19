@@ -2,8 +2,9 @@
 
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
 
-/** Demo only. Plays the office whose turn it is, so the stepper and the outcome states can be watched. */
+/** Demo only. Plays the office whose turn it is, so the path and the outcome states can be watched. */
 export function OfficeDemo({ requestId, role }: { requestId: string; role: string }) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
@@ -26,21 +27,17 @@ export function OfficeDemo({ requestId, role }: { requestId: string; role: strin
   }
 
   return (
-    <section aria-labelledby="demo-office" className="grid gap-2 border-t border-dashed border-[var(--s-line-strong)] pt-4">
+    <section aria-labelledby="demo-office" className="grid gap-2 rounded-2xl border border-dashed border-border bg-background p-4">
       <h2 id="demo-office">Demo: play the office</h2>
-      <p className="text-[0.8125rem] text-[var(--s-muted)]">For the pitch only. Decide as {role} and watch the path above change.</p>
-      {error && (
-        <p role="alert" className="text-[var(--s-bad-fg)]">
-          {error}
-        </p>
-      )}
+      <p className="text-sm text-muted-foreground">For the pitch only. Decide as {role} and watch the path change.</p>
+      {error && <p className="text-[#b3261e]">{error}</p>}
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="s-btn s-btn--quiet" disabled={busy} onClick={() => decide('approve')}>
+        <Button variant="outline" disabled={busy} onClick={() => decide('approve')}>
           Approve as {role}
-        </button>
-        <button type="button" className="s-btn s-btn--quiet" disabled={busy} onClick={() => decide('reject')}>
+        </Button>
+        <Button variant="outline" disabled={busy} onClick={() => decide('reject')}>
           Do not approve as {role}
-        </button>
+        </Button>
       </div>
     </section>
   )

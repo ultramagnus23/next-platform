@@ -65,6 +65,11 @@ export class StudentService {
     return state
   }
 
+  /** Rooms and what is free, from the admin portal. Null when this service is not joined to one. */
+  async findRooms(query: Parameters<NonNullable<Bridge['rooms']>>[0]) {
+    return this.bridge ? this.bridge.rooms(query) : null
+  }
+
   /** Today's date in IST, YYYY-MM-DD. */
   today(): string {
     return istDateOf(this.now())
@@ -83,8 +88,15 @@ export class StudentService {
     await this.repo.appendEvent({ id: this.repo.nextId('ev'), requestId, type, at: this.now().toISOString(), actor, detail, key })
   }
 
-  /** The path preview the form shows, using the stored rules. */
-  async previewPath(input: Pick<NewRequestInput, 'venueId' | 'category' | 'date' | 'startMin' | 'endMin' | 'needsAv' | 'guestSpeaker'>) {
+  /**
+   * The path preview the form shows. For a room that exists in the admin portal it is the admin chain for
+   * this club and event type. For anything else it falls back to the route table.
+   */
+  async previewPath(input: Pick<NewRequestInput, 'venueId' | 'category' | 'date' | 'startMin' | 'endMin' | 'needsAv' | 'guestSpeaker'>, orgName?: string) {
+    if (this.bridge && orgName && (await this.bridge.room(input.venueId))) {
+      const fromAdmin = await this.bridge.pathFor(orgName, input.category)
+      if (fromAdmin) return fromAdmin
+    }
     return approvalPath(
       {
         venueId: input.venueId,
@@ -101,7 +113,8 @@ export class StudentService {
 
   /** Create and send a request in one step. Saving a draft first is a separate call. */
   async submit(actor: StudentActor, input: NewRequestInput, previousRequestId: string | null = null): Promise<Result<RequestDetail>> {
-    const venue = STUDENT_VENUES.find((v) => v.id === input.venueId)
+    const adminRoom = this.bridge ? await this.bridge.room(input.venueId) : null
+    const venue = adminRoom ? { id: input.venueId, label: adminRoom.label, capacity: adminRoom.capacity as number | null } : STUDENT_VENUES.find((v) => v.id === input.venueId)
     if (!venue) return fail(400, 'Choose a space from the list.')
     if (input.endMin <= input.startMin) return fail(400, 'The event must end after it starts.')
     const start = eventInstant(input.date, input.startMin)
@@ -109,11 +122,11 @@ export class StudentService {
     if (start.getTime() <= now.getTime()) return fail(400, 'The event is in the past.')
     if (venue.capacity !== null && input.attendance > venue.capacity) return fail(400, `${venue.label} seats ${venue.capacity}.`)
 
-    const path = await this.previewPath(input)
+    const path = await this.previewPath(input, actor.organisationName)
     // A bridged space is also created in the admin portal, which checks the room and the timetable. If it
     // refuses, so do we, and the club sees why instead of a request that can never be approved.
     let adminRequestId: string | null = null
-    if (this.bridge?.canMirror(venue.id)) {
+    if (this.bridge && adminRoom) {
       const mirrored = await this.bridge.mirror(actor, input)
       if (!mirrored.ok) return fail(409, mirrored.error, { reason: 'slot_unavailable' })
       adminRequestId = mirrored.adminId

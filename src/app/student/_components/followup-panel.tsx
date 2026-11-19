@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
 import type { FollowupReason, FollowupResult } from '../logic/followup'
 import { formatDay, formatInstant, istDateOf } from '../utils'
 
@@ -27,7 +28,7 @@ function lockedText(reason: FollowupReason, unlockAt: string | null, waitDays: n
 }
 
 /**
- * The follow-up area. The button is always on the page. When it is locked it says why and gives the exact
+ * The reminder area. The button is always on the page. When it is locked it says why and gives the exact
  * date as text, not a tooltip, and uses aria-disabled so it stays in the tab order. The server decides:
  * if it refuses, the reason and unlock date it sends back are shown here.
  */
@@ -35,6 +36,7 @@ export function FollowupPanel({ requestId, role, followup, waitDays, urgencyDays
   const router = useRouter()
   const [phase, setPhase] = useState<Phase>('idle')
   const [sentAt, setSentAt] = useState<string | null>(null)
+  const [nextUnlock, setNextUnlock] = useState<string | null>(null)
   const [refusal, setRefusal] = useState<{ reason: FollowupReason; unlockAt: string | null } | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
 
@@ -48,8 +50,9 @@ export function FollowupPanel({ requestId, role, followup, waitDays, urgencyDays
     setFailure(null)
     try {
       const res = await fetch(`/api/student/requests/${requestId}/followup`, { method: 'POST' })
-      const body = (await res.json()) as { success: boolean; error?: string; reason?: FollowupReason; unlockAt?: string | null }
+      const body = (await res.json()) as { success: boolean; error?: string; reason?: FollowupReason; unlockAt?: string | null; data?: { followup?: { unlockAt: string | null } } }
       if (body.success) {
+        setNextUnlock(body.data?.followup?.unlockAt ?? null)
         setSentAt(new Date().toISOString())
         setPhase('sent')
         router.refresh()
@@ -69,36 +72,37 @@ export function FollowupPanel({ requestId, role, followup, waitDays, urgencyDays
   }
 
   const label = phase === 'sending' ? 'Sending reminder' : phase === 'failed' ? 'Try sending again' : `Send a reminder${role ? ` to ${role}` : ''}`
-  const disabled = (locked && phase !== 'sent') || phase === 'sending'
+  const disabled = locked || phase === 'sending'
 
   return (
-    <section aria-labelledby="followup-title" className="grid gap-2 border-t border-[var(--s-line)] pt-4">
-      <h2 id="followup-title">Follow up</h2>
+    <section aria-labelledby="followup-title" className="grid gap-2 rounded-2xl border border-border bg-background p-4 shadow-sm">
+      <h2 id="followup-title">Nudge the office</h2>
       <div>
-        <button
+        <Button
           type="button"
-          className="s-btn"
-          aria-disabled={disabled || phase === 'sent'}
+          aria-disabled={disabled}
           aria-busy={phase === 'sending'}
           aria-describedby="followup-help"
+          className={disabled ? 'cursor-not-allowed bg-muted text-muted-foreground shadow-none hover:bg-muted' : ''}
           onClick={send}
         >
           {label}
-        </button>
+        </Button>
       </div>
-      <div id="followup-help" aria-live="polite" className="text-[0.9375rem]">
+      <div id="followup-help" aria-live="polite" className="text-sm">
         {phase === 'sent' ? (
-          <p>Reminder sent{sentAt ? ` on ${formatInstant(sentAt)}` : ''}. {role ?? 'The office'} and you were emailed. {!followup.eligible && followup.unlockAt ? `You can send another on ${formatDay(istDateOf(new Date(followup.unlockAt)))}.` : `You can send another after ${waitDays} days.`}</p>
-        ) : phase === 'failed' ? (
-          <p role="alert" className="text-[var(--s-bad-fg)]">
-            {failure} Nothing was sent. Your request is unchanged.
+          <p className="animate-in fade-in duration-150">
+            Reminder sent{sentAt ? ` on ${formatInstant(sentAt)}` : ''}. {role ?? 'The office'} and you were emailed.{' '}
+            {(nextUnlock ?? (!followup.eligible ? followup.unlockAt : null)) ? `You can send another on ${formatDay(istDateOf(new Date((nextUnlock ?? followup.unlockAt) as string)))}.` : `You can send another after ${waitDays} days.`}
           </p>
+        ) : phase === 'failed' ? (
+          <p className="text-[#b3261e]">{failure} Nothing was sent. Your request is unchanged.</p>
         ) : locked ? (
-          <p>{lockedText(reason, unlockAt, waitDays)}</p>
+          <p className="text-muted-foreground">{lockedText(reason, unlockAt, waitDays)}</p>
         ) : followup.urgencyOverride ? (
           <p>Your event is on {formatDay(eventDate)}, less than {urgencyDays} days away, so you can send one early reminder now.</p>
         ) : (
-          <p>The office gets a reminder email and you are copied. You can send one every {waitDays} days.</p>
+          <p className="text-muted-foreground">The office gets a reminder email and you are copied. You can send one every {waitDays} days.</p>
         )}
       </div>
     </section>

@@ -21,6 +21,7 @@ export default function ThemeToggle() {
         <label className="switch">
             <input 
                 type="checkbox" 
+                aria-label="Dark mode"
                 checked={actualTheme === 'dark'}
                 onChange={handleToggle}
             />

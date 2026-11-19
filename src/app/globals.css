@@ -144,7 +144,8 @@ h3 {
   --secondary: var(--color-secondary);
   --secondary-foreground: #3a3a3a;
   --muted: #f7f7f7;
-  --muted-foreground: #888888;
+  /* Was #888888, which is 3.5 to 1 on white and fails WCAG AA for body text. */
+  --muted-foreground: #666666;
   --accent: #f7f7f7;
   --accent-foreground: #3a3a3a;
   --destructive: #c0392b;
@@ -469,3 +470,16 @@ html.dark .custom-scrollbar:hover::-webkit-scrollbar-thumb {
 .booking-scope h2 { text-align: left; font-size: 1rem; line-height: 1.5rem; font-weight: 700; }
 .booking-scope h3 { text-align: left; font-size: 0.875rem; line-height: 1.25rem; font-weight: 700; }
 .booking-scope h2.pane-title { font-size: 1.375rem; line-height: 1.75rem; font-weight: 800; }
+
+/* People who ask for less motion get none, across the booking portals. */
+@media (prefers-reduced-motion: reduce) {
+  .booking-scope *,
+  .booking-scope *::before,
+  .booking-scope *::after {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+    transition-duration: 0s !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+}

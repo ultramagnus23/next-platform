@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
 
 type Phase = 'choose' | 'reason' | 'sending' | 'done'
 
@@ -56,34 +58,34 @@ export function ApproveForm({ token }: { token: string }) {
   return (
     <div className="grid gap-3">
       {error && (
-        <p id="approve-error" role="alert" className="text-[var(--s-bad-fg)]">
+        <p id="approve-error" role="alert" className="text-[#b3261e]">
           {error}
         </p>
       )}
       {phase === 'reason' && (
         <label className="grid gap-1 text-sm">
           <span className="font-medium">Reason for not approving</span>
-          <textarea ref={reasonRef} className="s-field min-h-28" value={reason} onChange={(e) => setReason(e.target.value)} rows={4} required aria-invalid={error ? true : undefined} aria-describedby={error ? 'approve-error' : undefined} />
+          <Textarea ref={reasonRef} value={reason} onChange={(e) => setReason(e.target.value)} rows={4} required aria-invalid={error ? true : undefined} aria-describedby={error ? 'approve-error' : undefined} />
         </label>
       )}
       <div className="flex flex-wrap gap-2">
         {phase !== 'reason' && (
-          <button type="button" className="s-btn" disabled={phase === 'sending'} onClick={() => send('approve')}>
+          <Button disabled={phase === 'sending'} onClick={() => send('approve')}>
             Approve this request
-          </button>
+          </Button>
         )}
         {phase === 'choose' || phase === 'sending' ? (
-          <button type="button" className="s-btn s-btn--quiet" disabled={phase === 'sending'} onClick={() => setPhase('reason')}>
+          <Button variant="outline" disabled={phase === 'sending'} onClick={() => setPhase('reason')}>
             Do not approve
-          </button>
+          </Button>
         ) : (
           <>
-            <button type="button" className="s-btn" onClick={() => send('reject')}>
+            <Button onClick={() => send('reject')}>
               Send reason and do not approve
-            </button>
-            <button type="button" className="s-btn s-btn--quiet" onClick={() => setPhase('choose')}>
+            </Button>
+            <Button variant="outline" onClick={() => setPhase('choose')}>
               Go back
-            </button>
+            </Button>
           </>
         )}
       </div>

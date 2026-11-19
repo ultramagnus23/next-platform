@@ -2,6 +2,7 @@
 
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
+import { Button } from '@/components/ui/button'
 
 /** Cancel with an inline confirmation, so a stray tap does not cancel a request. */
 export function CancelRequest({ requestId }: { requestId: string }) {
@@ -35,26 +36,22 @@ export function CancelRequest({ requestId }: { requestId: string }) {
 
   if (!asking) {
     return (
-      <button type="button" className="s-btn s-btn--quiet" onClick={() => setAsking(true)}>
+      <Button variant="outline" onClick={() => setAsking(true)}>
         Cancel this request
-      </button>
+      </Button>
     )
   }
   return (
-    <div ref={confirmRef} tabIndex={-1} className="grid gap-2 outline-none" role="group" aria-label="Confirm cancel">
+    <div ref={confirmRef} tabIndex={-1} className="grid gap-2 outline-none animate-in fade-in duration-150" role="group" aria-label="Confirm cancel">
       <p>Cancel this request? The offices on the path are told, and you cannot undo it.</p>
-      {error && (
-        <p role="alert" className="text-[var(--s-bad-fg)]">
-          {error}
-        </p>
-      )}
+      {error && <p className="text-[#b3261e]">{error}</p>}
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="s-btn" disabled={busy} onClick={cancel}>
+        <Button disabled={busy} onClick={cancel}>
           {busy ? 'Cancelling' : 'Yes, cancel request'}
-        </button>
-        <button type="button" className="s-btn s-btn--quiet" disabled={busy} onClick={() => setAsking(false)}>
+        </Button>
+        <Button variant="outline" disabled={busy} onClick={() => setAsking(false)}>
           Keep the request
-        </button>
+        </Button>
       </div>
     </div>
   )

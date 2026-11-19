@@ -2,8 +2,9 @@
 
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { Button } from '@/components/ui/button'
 
-/** Demo only. Moves the clock so waiting, "taking longer" and the follow-up unlock can be seen at once. */
+/** Demo only. Moves the clock so waiting, "taking longer" and the reminder unlock can be seen at once. */
 export function DemoControls({ sandbox, nowLabel }: { sandbox: boolean; nowLabel: string }) {
   const router = useRouter()
   const [busy, setBusy] = useState(false)
@@ -25,25 +26,23 @@ export function DemoControls({ sandbox, nowLabel }: { sandbox: boolean; nowLabel
   }
 
   return (
-    <div className="border-b border-[var(--s-line)] bg-[var(--s-raised)]">
-      <div className="mx-auto flex max-w-3xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-2 text-[0.8125rem]">
-        <p className="min-w-0 flex-1 basis-64">
-          {sandbox ? 'Public sandbox: your own private copy of sample data. No email is sent.' : 'Demo mode. No email is sent.'} Demo date: <strong>{nowLabel}</strong>
-        </p>
-        <div className="flex items-center gap-2">
-          <button type="button" className="s-btn s-btn--quiet" disabled={busy} onClick={() => advance(1)}>
-            Move on 1 day
-          </button>
-          <button type="button" className="s-btn s-btn--quiet" disabled={busy} onClick={() => advance(7)}>
-            Move on 7 days
-          </button>
-        </div>
-        {error && (
-          <p role="alert" className="basis-full text-[var(--s-bad-fg)]">
-            {error}
-          </p>
-        )}
+    <div className="flex flex-col gap-1.5 rounded-md border border-border bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+      <p>
+        {sandbox ? 'Public sandbox: your own private copy of sample data. No email is sent.' : 'Demo mode. No email is sent.'} Demo date: <strong className="text-foreground">{nowLabel}</strong>
+      </p>
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="outline" className="h-8 bg-background" disabled={busy} onClick={() => advance(1)}>
+          Move on 1 day
+        </Button>
+        <Button size="sm" variant="outline" className="h-8 bg-background" disabled={busy} onClick={() => advance(7)}>
+          Move on 7 days
+        </Button>
       </div>
+      {error && (
+        <p role="alert" className="text-[#b3261e]">
+          {error}
+        </p>
+      )}
     </div>
   )
 }

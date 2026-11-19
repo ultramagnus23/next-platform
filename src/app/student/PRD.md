@@ -96,7 +96,7 @@ src/app/student/
   types.ts  data.ts  utils.ts  schema.ts
   logic/    status.ts followup.ts approval-path.ts (pure, client safe, with tests)
   _server/  email.ts outbox.ts tokens.ts scheduler.ts repo/
-  _components/  status-chip.tsx stepper.tsx followup-panel.tsx path-preview.tsx request-form.tsx ...
+  _components/  status-chip.tsx stepper.tsx followup-panel.tsx path-preview.tsx room-finder.tsx panel.tsx ...
 src/app/api/student/             requests, follow-up, approve (POST), cron tick
 ```
 Shared with admin by import from the admin owner's folder (rooms, offices, repository), never moved into `src/lib`.
@@ -146,3 +146,11 @@ Hooks proposed, not enabled: a Stop hook running `npm run typecheck` and `npm ru
 - A club cancelling a bridged request is recorded in the admin portal as not approved with the reason "Withdrawn by the club." because the admin portal has no withdraw action. Add one if that wording is wrong for the offices.
 - A follow-up shows in the admin request log as a note. Moving the demo clock from the student page moves the admin clock too. Moving it from the admin demo bar does not move the student clock.
 - The admin portal refuses very little (it flags). So the slot conflict screen with three alternatives is still not built.
+
+## 15. Redesign (club side matches the admin side)
+
+- The club side now uses the admin shell (sidebar, top bar, Nunito, crimson, shadcn parts) and a shared Panel shape. The custom Public Sans theme was dropped.
+- The request is one screen, "Find a space": date, time, people and needs, then the free rooms from the admin portal, then pick, name and send. The path shown before sending is the admin chain for the club and event type.
+- A club can now ask for any bookable room the admin portal knows, not only seven named spaces. Other clubs' event names are never shown, only "Booked".
+- Shared changes: secondary text colour darkened for contrast, a label on the theme toggle, and a reduced motion rule for both booking portals.
+- Not built: Stitch screens (its tools were not available), the guest speaker question, and the old route table preview for spaces that have no admin room.

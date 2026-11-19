@@ -31,8 +31,14 @@ class FakeBridge implements Bridge {
   view_: AdminView | null = null
   calls: string[] = []
   refuse: string | null = null
-  canMirror(venueId: string) {
-    return venueId === 'dr-reddys-auditorium'
+  async room(venueId: string) {
+    return venueId === 'dr-reddys-auditorium' ? { id: 'ac-01-dr-reddy-s-auditorium', label: 'AC-01, Dr. Reddy’s Auditorium', capacity: 500 } : null
+  }
+  async rooms() {
+    return { rooms: [], buildings: [], freeCount: 0, total: 0 }
+  }
+  async pathFor() {
+    return null
   }
   async mirror() {
     this.calls.push('mirror')

@@ -5,6 +5,7 @@ import type {
   SidebarCategory,
 } from "./types";
 import { adminSidebar } from "./admin";
+import { studentSidebar } from "./student";
 
 /**
  * Every interface, keyed by id. Adding an interface means adding its config
@@ -12,6 +13,7 @@ import { adminSidebar } from "./admin";
  */
 export const sidebarInterfaces = {
   admin: adminSidebar,
+  student: studentSidebar,
 } as const;
 
 export type SidebarInterfaceId = keyof typeof sidebarInterfaces;
